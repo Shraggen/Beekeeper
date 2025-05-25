@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Beekeeper</string>
+    <string name="start_listening_session">Start Listening Session</string>
+    <string name="stop_listening_session">Stop Listening Session</string>
+</resources>
