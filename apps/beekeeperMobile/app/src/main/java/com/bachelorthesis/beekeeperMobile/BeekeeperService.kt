@@ -27,51 +27,72 @@ import java.util.regex.Pattern
 class BeekeeperService : Service() {
 
     private enum class ServiceState {
-        IDLE_LISTENING_FOR_WAKE_WORD, // Porcupine is active
-        PROMPTING_FOR_COMMAND,        // TTS "Yes?" is speaking, preparing for SR
-        LISTENING_FOR_COMMAND,        // Android SpeechRecognizer is active
-        PROCESSING_AND_SPEAKING       // Command is being processed, TTS is speaking result/error
+        IDLE_LISTENING_FOR_WAKE_WORD,
+        PROMPTING_FOR_COMMAND,
+        LISTENING_FOR_COMMAND,
+        PROCESSING_AND_SPEAKING
     }
     private var currentState: ServiceState = ServiceState.IDLE_LISTENING_FOR_WAKE_WORD
-    // --- End State Management ---
+        set(value) {
+            if (field != value) {
+                Log.i(TAG, "State Transition: $field -> $value")
+                val oldState = field
+                field = value
+                handleStateChange(value, oldState)
+            } else {
+                Log.d(TAG, "Attempted to set state to current state: $value. No change.")
+            }
+        }
 
     companion object {
         private const val TAG = "BeekeeperService"
         private const val NOTIFICATION_CHANNEL_ID = "BeekeeperServiceChannel"
         private const val NOTIFICATION_ID = 1
+        private const val SR_START_DELAY_MS = 300L // Increased slightly for more stability
 
-        // TTS Utterance IDs
         private const val UTTERANCE_ID_PROMPT_FOR_COMMAND = "PROMPT_FOR_COMMAND"
         private const val UTTERANCE_ID_COMMAND_RESPONSE_PREFIX = "COMMAND_RESPONSE_"
-        private const val UTTERANCE_ID_ERROR_PREFIX = "ERROR_" // General error prefix
+        private const val UTTERANCE_ID_ERROR_PREFIX = "ERROR_"
 
-        // Picovoice Configuration - IMPORTANT: Manage your Access Key securely!
-        // Replace with your actual key, ideally from BuildConfig
         private const val PICOVOICE_ACCESS_KEY = BuildConfig.PICOVOICE_ACCESS_KEY
-        private const val WAKE_WORD_FILE_NAME = "hey_beekeeper.ppn" // Your wake word file
+        private const val WAKE_WORD_FILE_NAME = "hey_beekeeper.ppn"
         private const val MODEL_FILE_NAME = "porcupine_params.pv"
+
+        const val LANG_ENGLISH = "en-US"
+        const val LANG_GERMAN = "de-DE"
+        var ACTIVE_STT_LANGUAGE = LANG_ENGLISH // Default to English
+
+        fun getActiveLocale(): Locale {
+            return if (ACTIVE_STT_LANGUAGE == LANG_GERMAN) Locale.GERMAN else Locale.ENGLISH
+        }
     }
 
     private var porcupineManager: PorcupineManager? = null
-    private lateinit var speechRecognizer: SpeechRecognizer
+    private var speechRecognizer: SpeechRecognizer? = null // Now nullable, created/destroyed per session
     private lateinit var textToSpeech: TextToSpeech
+    private lateinit var recognitionListener: RecognitionListener // Store listener instance
 
     private val hiveLogs: MutableMap<Int, MutableList<String>> = mutableMapOf()
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "Service Created. Initial State: $currentState")
+        Log.d(TAG, "Service Created. Initializing for language: $ACTIVE_STT_LANGUAGE")
         setupNotificationChannel()
+        initializeTts()
+        setupRecognitionListener() // Setup listener once
+        initializePorcupine()
+        Log.i(TAG, "Service onCreate completed. Current State: $currentState")
+    }
 
-        // Initialize TextToSpeech with UtteranceProgressListener
+    private fun initializeTts() {
         textToSpeech = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                val result = textToSpeech.setLanguage(Locale.US)
-                if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    Log.e(TAG, "TTS language (US) not supported or missing data.")
+                val langResult = textToSpeech.setLanguage(getActiveLocale())
+                if (langResult == TextToSpeech.LANG_MISSING_DATA || langResult == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    Log.e(TAG, "TTS language (${getActiveLocale()}) not supported or missing data.")
                 } else {
-                    Log.d(TAG, "TTS Initialized successfully.")
+                    Log.d(TAG, "TTS Initialized successfully for ${getActiveLocale()}.")
                 }
             } else {
                 Log.e(TAG, "TTS Initialization failed with status: $status")
@@ -85,18 +106,23 @@ class BeekeeperService : Service() {
 
             override fun onDone(utteranceId: String?) {
                 Log.d(TAG, "TTS onDone: $utteranceId, Current State: $currentState")
-                runOnUiThread {
+                mainHandler.post {
                     when {
                         utteranceId == UTTERANCE_ID_PROMPT_FOR_COMMAND && currentState == ServiceState.PROMPTING_FOR_COMMAND -> {
-                            Log.d(TAG, "TTS prompt finished, transitioning to LISTENING_FOR_COMMAND")
-                            setCurrentState(ServiceState.LISTENING_FOR_COMMAND)
+                            Log.d(TAG, "TTS prompt finished. Preparing to listen for command with delay.")
+                            mainHandler.postDelayed({
+                                if (currentState == ServiceState.PROMPTING_FOR_COMMAND) {
+                                    Log.d(TAG, "Delay ended. Transitioning to LISTENING_FOR_COMMAND.")
+                                    currentState = ServiceState.LISTENING_FOR_COMMAND
+                                } else {
+                                    Log.w(TAG, "State changed during SR start delay. Current: $currentState. Not starting SR.")
+                                }
+                            }, SR_START_DELAY_MS)
                         }
-                        (utteranceId?.startsWith(UTTERANCE_ID_COMMAND_RESPONSE_PREFIX) == true || utteranceId?.startsWith(
-                            UTTERANCE_ID_ERROR_PREFIX
-                        ) == true) &&
+                        (utteranceId?.startsWith(UTTERANCE_ID_COMMAND_RESPONSE_PREFIX) == true || utteranceId?.startsWith(UTTERANCE_ID_ERROR_PREFIX) == true) &&
                                 currentState == ServiceState.PROCESSING_AND_SPEAKING -> {
-                            Log.d(TAG, "TTS response/error finished, transitioning to IDLE")
-                            setCurrentState(ServiceState.IDLE_LISTENING_FOR_WAKE_WORD)
+                            Log.d(TAG, "TTS response/error finished, transitioning to IDLE.")
+                            currentState = ServiceState.IDLE_LISTENING_FOR_WAKE_WORD
                         }
                     }
                 }
@@ -104,88 +130,89 @@ class BeekeeperService : Service() {
 
             override fun onError(utteranceId: String?) {
                 Log.e(TAG, "TTS onError for utteranceId: $utteranceId. Current State: $currentState")
-                runOnUiThread {
+                mainHandler.post {
                     if (currentState == ServiceState.PROMPTING_FOR_COMMAND || currentState == ServiceState.PROCESSING_AND_SPEAKING) {
-                        Log.d(TAG, "TTS error, transitioning to IDLE")
-                        setCurrentState(ServiceState.IDLE_LISTENING_FOR_WAKE_WORD)
+                        Log.e(TAG, "TTS error, transitioning to IDLE to recover.")
+                        currentState = ServiceState.IDLE_LISTENING_FOR_WAKE_WORD
                     }
                 }
             }
-            override fun onError(utteranceId: String?, errorCode: Int) { // For newer API levels
-                onError(utteranceId) // Delegate to older method for simplicity
+            override fun onError(utteranceId: String?, errorCode: Int) {
                 Log.e(TAG, "TTS onError (with errorCode $errorCode) for utteranceId: $utteranceId.")
+                onError(utteranceId)
             }
         })
-
-        setupSpeechRecognizer()
-        initializePorcupine()
     }
 
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "Service onStartCommand. Current State: $currentState")
+        Log.d(TAG, "Service onStartCommand. Current State: $currentState, Target Lang: $ACTIVE_STT_LANGUAGE")
         startForeground(NOTIFICATION_ID, createNotification())
-        // If service is restarted, ensure it goes to a known good state.
-        // onCreate would have already initialized components.
-        setCurrentState(ServiceState.IDLE_LISTENING_FOR_WAKE_WORD)
+        if (currentState != ServiceState.IDLE_LISTENING_FOR_WAKE_WORD) {
+            currentState = ServiceState.IDLE_LISTENING_FOR_WAKE_WORD
+        } else {
+            startPorcupine()
+        }
         return START_STICKY
     }
 
     override fun onDestroy() {
         Log.d(TAG, "Service Destroyed")
-        // Clean up resources
+        mainHandler.removeCallbacksAndMessages(null)
         textToSpeech.stop()
         textToSpeech.shutdown()
-
-        speechRecognizer.destroy()
-
-        porcupineManager?.stop()
+        stopSpeechRecognizer() // Ensure SR is destroyed if active
+        stopPorcupine()
         porcupineManager?.delete()
         porcupineManager = null
-
         super.onDestroy()
     }
 
-    override fun onBind(intent: Intent?): IBinder? {
-        return null // Not a bound service
-    }
-    // --- End Android Service Lifecycle Methods ---
+    override fun onBind(intent: Intent?): IBinder? = null
 
-
-    // --- Initialization Methods ---
     private fun initializePorcupine() {
-        if (PICOVOICE_ACCESS_KEY.isEmpty()) {
-            Log.e(TAG, "PICOVOICE_ACCESS_KEY is not set! Please replace placeholder.")
-            // Consider stopping the service or notifying the user more prominently
-            return
-        }
-        try {
-            val modelPath = copyAssetToCache(MODEL_FILE_NAME)
-            val keywordPath = copyAssetToCache(WAKE_WORD_FILE_NAME)
+        mainHandler.post {
+            if (PICOVOICE_ACCESS_KEY.isBlank()) {
+                Log.e(TAG, "PICOVOICE_ACCESS_KEY is not set! Please set it in BuildConfig.")
+                stopSelf()
+                return@post
+            }
+            try {
+                val modelPath = copyAssetToCache(MODEL_FILE_NAME)
+                val keywordPath = copyAssetToCache(WAKE_WORD_FILE_NAME)
 
-            porcupineManager = PorcupineManager.Builder()
-                .setAccessKey(PICOVOICE_ACCESS_KEY)
-                .setKeywordPath(keywordPath)
-                .setModelPath(modelPath)
-                .setSensitivity(0.7f)
-                .build(applicationContext) { keywordIndex ->
-                    runOnUiThread {
-                        if (keywordIndex == 0 && currentState == ServiceState.IDLE_LISTENING_FOR_WAKE_WORD) {
-                            Log.i(TAG, "Wake word '${WAKE_WORD_FILE_NAME}' detected!")
-                            setCurrentState(ServiceState.PROMPTING_FOR_COMMAND)
+                porcupineManager = PorcupineManager.Builder()
+                    .setAccessKey(PICOVOICE_ACCESS_KEY)
+                    .setKeywordPath(keywordPath)
+                    .setModelPath(modelPath)
+                    .setSensitivity(0.7f)
+                    .build(applicationContext) { keywordIndex ->
+                        mainHandler.post {
+                            if (keywordIndex == 0 && currentState == ServiceState.IDLE_LISTENING_FOR_WAKE_WORD) {
+                                Log.i(TAG, "Wake word '${WAKE_WORD_FILE_NAME}' detected!")
+                                currentState = ServiceState.PROMPTING_FOR_COMMAND
+                            } else if (currentState != ServiceState.IDLE_LISTENING_FOR_WAKE_WORD) {
+                                Log.w(TAG, "Wake word detected but not in IDLE state. Current: $currentState. Ignoring.")
+                            }
                         }
                     }
-                }
-            Log.d(TAG, "PorcupineManager built successfully.")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error initializing Porcupine: ${e.message}", e)
-            // This is a critical failure. The service might not be able to function.
+                Log.d(TAG, "PorcupineManager built successfully.")
+            } catch (e: Exception) {
+                Log.e(TAG, "Fatal error initializing Porcupine: ${e.message}", e)
+                stopSelf()
+            }
         }
     }
 
-    private fun setupSpeechRecognizer() {
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this.applicationContext)
-        speechRecognizer.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) { Log.d(TAG, "SR: Ready. Current State: $currentState") }
+    private fun setupRecognitionListener() {
+        recognitionListener = object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {
+                Log.d(TAG, "SR: Ready. Current State: $currentState")
+                if (currentState != ServiceState.LISTENING_FOR_COMMAND) {
+                    Log.w(TAG, "SR: onReadyForSpeech but not in LISTENING_FOR_COMMAND state. Current: $currentState. Stopping SR.")
+                    stopSpeechRecognizer()
+                }
+            }
             override fun onBeginningOfSpeech() { Log.d(TAG, "SR: Beginning. Current State: $currentState") }
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
@@ -193,220 +220,361 @@ class BeekeeperService : Service() {
 
             override fun onError(error: Int) {
                 val errorMsg = getSpeechRecognizerErrorText(error)
-                Log.e(TAG, "SR Error: $errorMsg (code: $error). Current State: $currentState")
-                runOnUiThread {
+                Log.e(TAG, "SR Error: $errorMsg (code: $error). Current State at callback: $currentState")
+                mainHandler.post {
                     if (currentState == ServiceState.LISTENING_FOR_COMMAND) {
-                        setCurrentState(ServiceState.PROCESSING_AND_SPEAKING)
-                        speakText("Sorry, I had trouble understanding. $errorMsg", UTTERANCE_ID_ERROR_PREFIX + "SR_ERROR")
+                        currentState = ServiceState.PROCESSING_AND_SPEAKING
+                        // stopSpeechRecognizer() is called by handleStateChange for PROCESSING_AND_SPEAKING
+                        speakText("Sorry, I had trouble understanding. $errorMsg", UTTERANCE_ID_ERROR_PREFIX + "SR_ERROR_CODE_" + error, getActiveLocale())
+                    } else {
+                        Log.w(TAG, "SR Error (code $error) received but not in LISTENING_FOR_COMMAND state. Current: $currentState. Ignoring.")
                     }
                 }
             }
 
             override fun onResults(results: Bundle?) {
-                Log.d(TAG, "SR: Results received. Current State: $currentState")
-                runOnUiThread {
+                Log.d(TAG, "SR: Results received. Current State at callback: $currentState")
+                mainHandler.post {
                     if (currentState == ServiceState.LISTENING_FOR_COMMAND) {
+                        var command: String? = null
                         val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         if (matches != null && matches.isNotEmpty()) {
-                            val command = matches[0].lowercase(Locale.ROOT)
+                            command = matches[0].lowercase(getActiveLocale())
                             Log.i(TAG, "Command received via SR: '$command'")
-                            setCurrentState(ServiceState.PROCESSING_AND_SPEAKING)
+
+                            // Heuristic for "log" vs "lock" if English
+                            if (ACTIVE_STT_LANGUAGE == LANG_ENGLISH && command != null) {
+                                command = command.replace("lock of", "log of")
+                                    .replace("last lock", "last log")
+                                    .replace("create a lock", "create a log")
+                                    .replace("beehive lock", "beehive log")
+                                    .replace("lock for", "log for")
+                                if (command != matches[0].lowercase(getActiveLocale())) {
+                                    Log.i(TAG, "Command after heuristic correction: '$command'")
+                                }
+                            }
+                        }
+
+                        currentState = ServiceState.PROCESSING_AND_SPEAKING
+                        // stopSpeechRecognizer() is called by handleStateChange for PROCESSING_AND_SPEAKING
+
+                        if (command != null) {
                             processCommand(command)
                         } else {
-                            Log.w(TAG, "SR: No matches found.")
-                            setCurrentState(ServiceState.PROCESSING_AND_SPEAKING)
-                            speakText("I didn't catch that. Please try again.", UTTERANCE_ID_ERROR_PREFIX + "NO_MATCH")
+                            Log.w(TAG, "SR: No matches found or command is null.")
+                            speakText("I didn't catch that. Please try again.", UTTERANCE_ID_ERROR_PREFIX + "NO_MATCH", getActiveLocale())
                         }
+                    } else {
+                        Log.w(TAG, "SR Results received but not in LISTENING_FOR_COMMAND state. Current: $currentState. Ignoring.")
                     }
                 }
             }
             override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
-        })
+        }
+        Log.d(TAG, "RecognitionListener setup complete.")
     }
-    // --- End Initialization Methods ---
 
 
-    // --- State Transition and Component Control ---
-    private fun setCurrentState(newState: ServiceState) {
-        if (currentState == newState && newState != ServiceState.IDLE_LISTENING_FOR_WAKE_WORD && newState != ServiceState.PROMPTING_FOR_COMMAND) {
-            Log.d(TAG, "Already in state $newState or no need to re-trigger. No change.")
-            return
-        }
-        Log.i(TAG, "State Transition: $currentState -> $newState")
-        val oldState = currentState
-        currentState = newState
-
-        // Stop components based on old state or general cleanup before starting new ones
-        if (oldState == ServiceState.LISTENING_FOR_COMMAND && newState != ServiceState.LISTENING_FOR_COMMAND) {
-            stopSpeechRecognizer()
-        }
-        if (oldState == ServiceState.IDLE_LISTENING_FOR_WAKE_WORD && newState != ServiceState.IDLE_LISTENING_FOR_WAKE_WORD) {
-            stopPorcupine()
-        }
-        if (textToSpeech.isSpeaking && (newState == ServiceState.IDLE_LISTENING_FOR_WAKE_WORD || newState == ServiceState.LISTENING_FOR_COMMAND)) {
-            Log.d(TAG, "Stopping TTS as new state ($newState) doesn't expect it to be speaking.")
-            textToSpeech.stop()
-        }
-
-        // Start components based on the new state
-        when (newState) {
-            ServiceState.IDLE_LISTENING_FOR_WAKE_WORD -> {
-                stopSpeechRecognizer() // Ensure SR is off
-                startPorcupine()
-            }
-            ServiceState.PROMPTING_FOR_COMMAND -> {
+    private fun handleStateChange(newState: ServiceState, oldState: ServiceState) {
+        Log.d(TAG, "Handling state change to: $newState (from $oldState)")
+        mainHandler.post {
+            // Stop components based on leaving the oldState or entering the newState
+            if (oldState == ServiceState.IDLE_LISTENING_FOR_WAKE_WORD && newState != ServiceState.IDLE_LISTENING_FOR_WAKE_WORD) {
                 stopPorcupine()
+            }
+            if (oldState == ServiceState.LISTENING_FOR_COMMAND && newState != ServiceState.LISTENING_FOR_COMMAND) {
                 stopSpeechRecognizer()
-                speakText("Yes?",
-                    UTTERANCE_ID_PROMPT_FOR_COMMAND
-                )
             }
-            ServiceState.LISTENING_FOR_COMMAND -> {
-                // Porcupine should be stopped from previous state.
-                // TTS for prompt should have finished (handled by onDone).
-                startSpeechRecognizer()
-            }
-            ServiceState.PROCESSING_AND_SPEAKING -> {
-                // SpeechRecognizer should have provided results and would be stopped by its callback or here.
-                stopSpeechRecognizer() // Ensure SR is off
-                // The actual command processing (processCommand) leads to TTS.
-                // TTS onDone will transition us back to IDLE.
+
+            // Configure for the NEW state
+            when (newState) {
+                ServiceState.IDLE_LISTENING_FOR_WAKE_WORD -> {
+                    Log.d(TAG, "Configuring for IDLE_LISTENING_FOR_WAKE_WORD")
+                    stopSpeechRecognizer() // Ensure SR is stopped
+                    if (textToSpeech.isSpeaking) {
+                        Log.d(TAG, "TTS was speaking, stopping it for IDLE state.")
+                        textToSpeech.stop()
+                    }
+                    startPorcupine()
+                }
+                ServiceState.PROMPTING_FOR_COMMAND -> {
+                    Log.d(TAG, "Configuring for PROMPTING_FOR_COMMAND")
+                    // Porcupine should have been stopped when leaving IDLE.
+                    // Ensure SR is stopped before TTS prompt.
+                    stopSpeechRecognizer()
+                    val prompt = if (ACTIVE_STT_LANGUAGE == LANG_GERMAN) "Ja?" else "Yes?"
+                    speakText(prompt, UTTERANCE_ID_PROMPT_FOR_COMMAND, getActiveLocale())
+                }
+                ServiceState.LISTENING_FOR_COMMAND -> {
+                    Log.d(TAG, "Configuring for LISTENING_FOR_COMMAND")
+                    // Porcupine is stopped. TTS prompt has finished (via onDone callback).
+                    startSpeechRecognizer()
+                }
+                ServiceState.PROCESSING_AND_SPEAKING -> {
+                    Log.d(TAG, "Configuring for PROCESSING_AND_SPEAKING")
+                    // SR results/error has occurred. SR should be stopped (or will be by its callback handler).
+                    // If not already stopped by SR callback, ensure it is.
+                    stopSpeechRecognizer()
+                    // Actual command processing and TTS speaking is triggered by SR callbacks.
+                    // TTS onDone will transition to IDLE.
+                }
             }
         }
     }
 
     private fun startPorcupine() {
-        if (porcupineManager == null) {
-            Log.w(TAG, "PorcupineManager not initialized. Attempting to re-initialize.")
-            initializePorcupine()
+        mainHandler.post {
             if (porcupineManager == null) {
-                Log.e(TAG, "Failed to initialize Porcupine. Cannot start.")
-                // Consider a more robust error handling, maybe stop service or notify user.
-                return
+                Log.w(TAG, "PorcupineManager not initialized. Attempting to re-initialize.")
+                initializePorcupine()
+                if (porcupineManager == null) {
+                    Log.e(TAG, "Failed to initialize Porcupine after re-attempt. Cannot start.")
+                    stopSelf()
+                    return@post
+                }
             }
-        }
-        try {
-            Log.d(TAG, "Attempting to start Porcupine.")
-            porcupineManager?.start()
-            Log.i(TAG, "Porcupine started successfully.")
-        } catch (e: PorcupineException) {
-            Log.e(TAG, "Error starting Porcupine: ${e.message}")
+            try {
+                Log.d(TAG, "Attempting to start Porcupine.")
+                porcupineManager?.start()
+                Log.i(TAG, "Porcupine started successfully.")
+            } catch (e: PorcupineException) {
+                if (e.message?.contains("Porcupine is already running", ignoreCase = true) == true) {
+                    Log.w(TAG, "Attempted to start Porcupine but it was already running.")
+                } else {
+                    Log.e(TAG, "Error starting Porcupine: ${e.message}", e)
+                }
+            }
         }
     }
 
     private fun stopPorcupine() {
-        porcupineManager?.let {
-            try {
-                Log.d(TAG, "Attempting to stop Porcupine.")
-                it.stop()
-                Log.i(TAG, "Porcupine stopped successfully.")
-            } catch (e: PorcupineException) {
-                Log.e(TAG, "Error stopping Porcupine: ${e.message}")
+        mainHandler.post {
+            porcupineManager?.let {
+                try {
+                    Log.d(TAG, "Attempting to stop Porcupine.")
+                    it.stop()
+                    Log.i(TAG, "Porcupine stopped successfully.")
+                } catch (e: PorcupineException) {
+                    if (e.message?.contains("Porcupine is not running", ignoreCase = true) == true) {
+                        Log.w(TAG, "Attempted to stop Porcupine but it was not running.")
+                    } else {
+                        Log.e(TAG, "Error stopping Porcupine: ${e.message}", e)
+                    }
+                }
             }
         }
     }
 
     private fun startSpeechRecognizer() {
-        if (!SpeechRecognizer.isRecognitionAvailable(applicationContext)) {
-            Log.e(TAG, "Speech recognition not available on this device.")
-            setCurrentState(ServiceState.PROCESSING_AND_SPEAKING) // To allow TTS error
-            speakText("Sorry, speech recognition is not available right now.", UTTERANCE_ID_ERROR_PREFIX + "SR_UNAVAILABLE")
-            return
+        mainHandler.post {
+            if (!SpeechRecognizer.isRecognitionAvailable(applicationContext)) {
+                Log.e(TAG, "Speech recognition not available on this device.")
+                processSpeechRecognizerUnavailable()
+                return@post
+            }
+
+            // Destroy previous instance if it exists and create a new one
+            speechRecognizer?.destroy() // Destroy old one first
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(applicationContext)
+            speechRecognizer?.setRecognitionListener(recognitionListener) // Set the stored listener
+            Log.d(TAG, "SpeechRecognizer instance (re)created. Starting listening for language: $ACTIVE_STT_LANGUAGE.")
+
+
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, ACTIVE_STT_LANGUAGE)
+            }
+            try {
+                speechRecognizer?.startListening(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Exception starting SpeechRecognizer: ${e.message}", e)
+                processSpeechRecognizerError("Failed to start listening.")
+            }
         }
-        Log.d(TAG, "Starting SpeechRecognizer.")
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.US.toString())
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Listening for command...") // Optional: some devices show this
-        }
-        speechRecognizer.startListening(intent)
     }
 
     private fun stopSpeechRecognizer() {
-        // Check if SR is active before trying to stop/cancel to avoid errors if not running.
-        // This requires more complex tracking or relying on try-catch.
-        // For simplicity, just calling stopListening. Add checks if issues arise.
-        Log.d(TAG, "Stopping SpeechRecognizer.")
-        speechRecognizer.stopListening() // or speechRecognizer.cancel()
+        mainHandler.post {
+            speechRecognizer?.let { sr ->
+                Log.d(TAG, "Attempting to stop and destroy SpeechRecognizer. Current state: $currentState")
+                try {
+                    sr.stopListening() // Call stopListening before cancel for graceful shutdown
+                    sr.cancel()
+                    sr.destroy() // Destroy the instance
+                    Log.d(TAG, "SpeechRecognizer stopped and destroyed.")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Exception during stopSpeechRecognizer: ${e.message}", e)
+                }
+            }
+            speechRecognizer = null // Nullify the reference
+        }
     }
 
-    private fun speakText(text: String, utteranceId: String) {
-        Log.d(TAG, "TTS speak: '$text' with ID '$utteranceId'")
-        textToSpeech.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+    private fun processSpeechRecognizerUnavailable() {
+        mainHandler.post {
+            if (currentState != ServiceState.PROCESSING_AND_SPEAKING) {
+                currentState = ServiceState.PROCESSING_AND_SPEAKING
+                val errorMsg = if (ACTIVE_STT_LANGUAGE == LANG_GERMAN) "Entschuldigung, Spracherkennung ist gerade nicht verfügbar." else "Sorry, speech recognition is not available right now."
+                speakText(errorMsg, UTTERANCE_ID_ERROR_PREFIX + "SR_UNAVAILABLE", getActiveLocale())
+            }
+        }
     }
-    // --- End State Transition and Component Control ---
+    private fun processSpeechRecognizerError(errorDetail: String) {
+        mainHandler.post {
+            if (currentState != ServiceState.PROCESSING_AND_SPEAKING) {
+                currentState = ServiceState.PROCESSING_AND_SPEAKING
+                val errorMsg = if (ACTIVE_STT_LANGUAGE == LANG_GERMAN) "Entschuldigung, ich hatte Probleme beim Verstehen. $errorDetail" else "Sorry, I had trouble understanding. $errorDetail"
+                speakText(errorMsg, UTTERANCE_ID_ERROR_PREFIX + "SR_GENERIC_ERROR", getActiveLocale())
+            }
+        }
+    }
 
+    private fun speakText(text: String, utteranceId: String, language: Locale) {
+        mainHandler.post {
+            Log.d(TAG, "TTS speak: '$text' with ID '$utteranceId' in language '$language'")
+            textToSpeech.language = language
+            val result = textToSpeech.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+            if (result == TextToSpeech.ERROR) {
+                Log.e(TAG, "TTS speak failed for utteranceId: $utteranceId")
+                if (currentState == ServiceState.PROMPTING_FOR_COMMAND || currentState == ServiceState.PROCESSING_AND_SPEAKING) {
+                    Log.e(TAG, "TTS speak error, transitioning to IDLE to recover.")
+                    currentState = ServiceState.IDLE_LISTENING_FOR_WAKE_WORD
+                }
+            }
+        }
+    }
 
-    // --- Command Processing ---
     private fun processCommand(command: String) {
-        // This function is called when currentState is PROCESSING_AND_SPEAKING
-        Log.d(TAG, "Processing command: '$command'")
-
-        val createLogPattern = Pattern.compile("create a log for beehive (\\d+) (.+)", Pattern.CASE_INSENSITIVE)
-        val createLogMatcher = createLogPattern.matcher(command)
-
-        val readLogPattern = Pattern.compile("(?:get me the|get) last log (?:of |for )?beehive (\\d+)", Pattern.CASE_INSENSITIVE)
-        val readLogMatcher = readLogPattern.matcher(command)
+        Log.d(TAG, "Processing command: '$command' with ACTIVE_STT_LANGUAGE: $ACTIVE_STT_LANGUAGE")
 
         var messageToSpeak: String
         var utteranceSuffix: String
+        val currentLocale = getActiveLocale()
 
-        when {
-            createLogMatcher.find() -> {
-                try {
-                    val hiveNumberStr = createLogMatcher.group(1)
-                    val payload = createLogMatcher.group(2)
-                    if (hiveNumberStr != null && payload != null) {
-                        val hiveNumber = hiveNumberStr.toInt()
-                        hiveLogs.getOrPut(hiveNumber) { mutableListOf() }.add(payload.trim())
-                        messageToSpeak = "Okay, log created for beehive $hiveNumber."
-                        utteranceSuffix = "LogCreated"
-                        Log.i(TAG, "$messageToSpeak Payload: '$payload'")
-                    } else {
-                        throw IllegalArgumentException("Could not parse hive number or payload from command.")
+        if (ACTIVE_STT_LANGUAGE == LANG_GERMAN) {
+            val readLogPatternDE = Pattern.compile("lies mir den letzten logeintrag von bienenstock (\\d+) vor", Pattern.CASE_INSENSITIVE)
+            val createLogPatternDE = Pattern.compile("mache ein logeintrag bei bienenstock (\\d+):? (.+)", Pattern.CASE_INSENSITIVE)
+            val readTaskPatternDE = Pattern.compile("lies mir die nächste unterhaltsarbeit für bienenstock (\\d+) vor", Pattern.CASE_INSENSITIVE)
+
+            val readLogMatcherDE = readLogPatternDE.matcher(command)
+            val createLogMatcherDE = createLogPatternDE.matcher(command)
+            val readTaskMatcherDE = readTaskPatternDE.matcher(command)
+
+            when {
+                createLogMatcherDE.find() -> {
+                    try {
+                        val hiveNumberStr = createLogMatcherDE.group(1)
+                        val payload = createLogMatcherDE.group(2)
+                        if (hiveNumberStr != null && payload != null) {
+                            val hiveNumber = hiveNumberStr.toInt()
+                            hiveLogs.getOrPut(hiveNumber) { mutableListOf() }.add(payload.trim())
+                            messageToSpeak = "Okay, Log für Bienenstock $hiveNumber erstellt."
+                            utteranceSuffix = "LogErstellt"
+                            Log.i(TAG, "$messageToSpeak Inhalt: '$payload'")
+                        } else { throw IllegalArgumentException("Konnte Bienenstocknummer oder Inhalt nicht parsen.") }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Fehler beim Verarbeiten 'Log erstellen': ${e.message}")
+                        messageToSpeak = "Entschuldigung, ich konnte den Log nicht erstellen."
+                        utteranceSuffix = "ErstellenLogFehler"
                     }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error processing 'create log' command: ${e.message}")
-                    messageToSpeak = "Sorry, I couldn't create the log. Please try again."
-                    utteranceSuffix = "CreateLogError"
+                }
+                readLogMatcherDE.find() -> {
+                    try {
+                        val hiveNumberStr = readLogMatcherDE.group(1)
+                        if (hiveNumberStr != null) {
+                            val hiveNumber = hiveNumberStr.toInt()
+                            val logsForHive = hiveLogs[hiveNumber]
+                            messageToSpeak = if (logsForHive.isNullOrEmpty()) {
+                                utteranceSuffix = "KeineLogsGefunden"
+                                "Keine Logs für Bienenstock $hiveNumber gefunden."
+                            } else {
+                                utteranceSuffix = "LeseLogDaten"
+                                Log.i(TAG, "Lese letzten Log für Bienenstock $hiveNumber: '${logsForHive.last()}'")
+                                "Letzter Log: " + logsForHive.last()
+                            }
+                        } else { throw IllegalArgumentException("Konnte Bienenstocknummer nicht parsen.") }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Fehler beim Verarbeiten 'Log lesen': ${e.message}")
+                        messageToSpeak = "Entschuldigung, ich konnte den Log nicht abrufen."
+                        utteranceSuffix = "LesenLogFehler"
+                    }
+                }
+                readTaskMatcherDE.find() -> {
+                    val hiveNumberStr = readTaskMatcherDE.group(1)
+                    val hiveNumber = hiveNumberStr?.toIntOrNull() ?: 0
+                    messageToSpeak = "Die Task-Funktion für Bienenstock $hiveNumber ist noch nicht implementiert."
+                    utteranceSuffix = "TaskNichtImplementiert"
+                }
+                else -> {
+                    messageToSpeak = "Entschuldigung, ich habe diesen Befehl nicht verstanden."
+                    utteranceSuffix = "UnbekannterBefehl"
                 }
             }
-            readLogMatcher.find() -> {
-                try {
-                    val hiveNumberStr = readLogMatcher.group(1)
-                    if (hiveNumberStr != null) {
-                        val hiveNumber = hiveNumberStr.toInt()
-                        val logsForHive = hiveLogs[hiveNumber]
-                        if (logsForHive.isNullOrEmpty()) {
-                            messageToSpeak = "No logs found for beehive $hiveNumber."
-                            utteranceSuffix = "NoLogsFound"
-                        } else {
-                            messageToSpeak = logsForHive.last() // Speak the log content
-                            utteranceSuffix = "ReadLogData"
-                            Log.i(TAG, "Reading last log for beehive $hiveNumber: '$messageToSpeak'")
-                        }
-                    } else {
-                        throw IllegalArgumentException("Could not parse hive number for reading log.")
+        } else { // English
+            val createLogPatternEN = Pattern.compile("create (?:a )?log for beehive (\\d+) (.+)", Pattern.CASE_INSENSITIVE) // Made "a" optional
+            val readLogPatternEN = Pattern.compile("(?:get me the|get) last log (?:of |for |from |off )?beehive (\\d+)", Pattern.CASE_INSENSITIVE)
+            val readTaskPatternEN = Pattern.compile("read (?:me the )?next maintenance task for beehive (\\d+)", Pattern.CASE_INSENSITIVE)
+
+            val createLogMatcherEN = createLogPatternEN.matcher(command)
+            val readLogMatcherEN = readLogPatternEN.matcher(command)
+            val readTaskMatcherEN = readTaskPatternEN.matcher(command)
+
+            when {
+                createLogMatcherEN.find() -> {
+                    try {
+                        val hiveNumberStr = createLogMatcherEN.group(1)
+                        val payload = createLogMatcherEN.group(2)
+                        if (hiveNumberStr != null && payload != null) {
+                            val hiveNumber = hiveNumberStr.toInt()
+                            hiveLogs.getOrPut(hiveNumber) { mutableListOf() }.add(payload.trim())
+                            messageToSpeak = "Okay, log created for beehive $hiveNumber."
+                            utteranceSuffix = "LogCreated"
+                            Log.i(TAG, "$messageToSpeak Payload: '$payload'")
+                        } else { throw IllegalArgumentException("Could not parse hive number or payload.") }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error processing 'create log': ${e.message}")
+                        messageToSpeak = "Sorry, I couldn't create the log."
+                        utteranceSuffix = "CreateLogError"
                     }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error processing 'read log' command: ${e.message}")
-                    messageToSpeak = "Sorry, I couldn't retrieve the log. Please try again."
-                    utteranceSuffix = "ReadLogError"
                 }
-            }
-            else -> {
-                messageToSpeak = "Sorry, I didn't understand that command."
-                utteranceSuffix = "UnknownCommand"
+                readLogMatcherEN.find() -> {
+                    try {
+                        val hiveNumberStr = readLogMatcherEN.group(1)
+                        if (hiveNumberStr != null) {
+                            val hiveNumber = hiveNumberStr.toInt()
+                            val logsForHive = hiveLogs[hiveNumber]
+                            messageToSpeak = if (logsForHive.isNullOrEmpty()) {
+                                utteranceSuffix = "NoLogsFound"
+                                "No logs found for beehive $hiveNumber."
+                            } else {
+                                utteranceSuffix = "ReadLogData"
+                                Log.i(TAG, "Reading last log for beehive $hiveNumber: '${logsForHive.last()}'")
+                                "Last log is: " + logsForHive.last()
+                            }
+                        } else { throw IllegalArgumentException("Could not parse hive number.") }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error processing 'read log': ${e.message}")
+                        messageToSpeak = "Sorry, I couldn't retrieve the log."
+                        utteranceSuffix = "ReadLogError"
+                    }
+                }
+                readTaskMatcherEN.find() -> {
+                    val hiveNumberStr = readTaskMatcherEN.group(1)
+                    val hiveNumber = hiveNumberStr?.toIntOrNull() ?: 0
+                    messageToSpeak = "The task feature for beehive $hiveNumber is not yet implemented."
+                    utteranceSuffix = "TaskNotImplemented"
+                }
+                else -> {
+                    messageToSpeak = "Sorry, I didn't understand that command."
+                    utteranceSuffix = "UnknownCommand"
+                }
             }
         }
-        speakText(messageToSpeak, UTTERANCE_ID_COMMAND_RESPONSE_PREFIX + utteranceSuffix)
+        speakText(messageToSpeak, UTTERANCE_ID_COMMAND_RESPONSE_PREFIX + utteranceSuffix, currentLocale)
     }
-    // --- End Command Processing ---
 
-
-    // --- Utility Methods ---
     private fun copyAssetToCache(fileName: String): String {
         val cacheFile = File(cacheDir, fileName)
         if (!cacheFile.exists()) {
@@ -419,27 +587,24 @@ class BeekeeperService : Service() {
                 Log.d(TAG, "Copied asset '$fileName' to cache: ${cacheFile.absolutePath}")
             } catch (e: Exception) {
                 Log.e(TAG, "Error copying asset '$fileName' to cache: ${e.message}", e)
-                throw e // Re-throw as this is critical for Porcupine initialization
+                throw e
             }
         }
         return cacheFile.absolutePath
     }
 
     private fun createNotification(): Notification {
-        val notificationIntent = Intent(this, MainActivity::class.java) // Assuming MainActivity exists
-        val pendingIntentFlags =
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        val notificationIntent = Intent(this, MainActivity::class.java)
+        val pendingIntentFlags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         val pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, pendingIntentFlags)
 
-        return NotificationCompat.Builder(this,
-            NOTIFICATION_CHANNEL_ID
-        )
+        return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setContentTitle("Beekeeper Assistant")
-            .setContentText("Listening for 'Hey Beekeeper'...")
-            .setSmallIcon(R.mipmap.ic_launcher) // Ensure this icon exists
+            .setContentText("Listening for 'Hey Beekeeper' (Lang: $ACTIVE_STT_LANGUAGE)...")
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
-            .setOngoing(true) // Makes the notification non-dismissable
-            .setPriority(NotificationCompat.PRIORITY_LOW) // Less intrusive
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
 
@@ -447,22 +612,13 @@ class BeekeeperService : Service() {
         val serviceChannel = NotificationChannel(
             NOTIFICATION_CHANNEL_ID,
             "Beekeeper Service Channel",
-            NotificationManager.IMPORTANCE_LOW // Use LOW to be less intrusive
+            NotificationManager.IMPORTANCE_LOW
         ).apply {
             description = "Channel for Beekeeper Assistant background service"
         }
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(serviceChannel)
         Log.d(TAG, "Notification channel created.")
-    }
-
-    private fun runOnUiThread(action: () -> Unit) {
-        // Check if already on main thread to avoid unnecessary posting
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            action()
-        } else {
-            mainHandler.post(action)
-        }
     }
 
     private fun getSpeechRecognizerErrorText(errorCode: Int): String {
@@ -476,8 +632,7 @@ class BeekeeperService : Service() {
             SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "RecognitionService busy."
             SpeechRecognizer.ERROR_SERVER -> "Error from server."
             SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech input."
-            else -> "Unknown speech recognizer error."
+            else -> "Unknown speech recognizer error ($errorCode)."
         }
     }
-
 }
