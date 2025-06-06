@@ -513,9 +513,9 @@ class BeekeeperService : Service() {
                 }
             }
         } else { // English
-            val createLogPatternEN = Pattern.compile("create (?:a )?log for beehive (\\d+) (.+)", Pattern.CASE_INSENSITIVE) // Made "a" optional
-            val readLogPatternEN = Pattern.compile("(?:get me the|get) last log (?:of |for |from |off )?beehive (\\d+)", Pattern.CASE_INSENSITIVE)
-            val readTaskPatternEN = Pattern.compile("read (?:me the )?next maintenance task for beehive (\\d+)", Pattern.CASE_INSENSITIVE)
+            val createLogPatternEN = Pattern.compile("entry for beehive (\\d+) (.+)", Pattern.CASE_INSENSITIVE) // Made "a" optional
+            val readLogPatternEN = Pattern.compile("get entry for beehive (\\d+)", Pattern.CASE_INSENSITIVE)
+            val readTaskPatternEN = Pattern.compile("get task for beehive (\\d+)", Pattern.CASE_INSENSITIVE)
 
             val createLogMatcherEN = createLogPatternEN.matcher(command)
             val readLogMatcherEN = readLogPatternEN.matcher(command)
