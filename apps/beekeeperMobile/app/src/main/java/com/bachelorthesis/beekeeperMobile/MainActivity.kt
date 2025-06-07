@@ -64,13 +64,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startBeekeeperService() {
-        val serviceIntent = Intent(this, BeekeeperService::class.java)
+        val serviceIntent = Intent(this, VoskBeekeeperService::class.java)
         startForegroundService(serviceIntent)
         Toast.makeText(this, "Beekeeper service started", Toast.LENGTH_SHORT).show()
     }
 
     private fun stopBeekeeperService() {
-        val serviceIntent = Intent(this, BeekeeperService::class.java)
+        val serviceIntent = Intent(this, VoskBeekeeperService::class.java)
         stopService(serviceIntent)
         Toast.makeText(this, "Beekeeper service stopped", Toast.LENGTH_SHORT).show()
     }
