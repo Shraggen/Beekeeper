@@ -1,2 +1,40 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when run with the -o flag
+*.out
+
+# Dependency directories (remove the comment below if you do not want to commit vendor)
+# vendor/
+
+# Go workspace file
+go.work
+
+# Environment configuration
 .env
-beekeeper-database.db
+.env.*
+!.env.example
+
+# Build output
+/beekeeper-api
+
+# Database file
+*.db
+
+# IDE settings
+.idea/
+.vscode/
+
+# macOS files
+.DS_Store
+
+# Log files
+*.log
+
