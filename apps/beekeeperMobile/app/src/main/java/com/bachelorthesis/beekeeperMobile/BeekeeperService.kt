@@ -20,6 +20,7 @@ import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.bachelorthesis.beekeeperMobile.models.CreateLogRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -328,41 +329,58 @@ class BeekeeperService : Service() {
         val taskMatcher = readTaskPattern.matcher(command)
         val helpMatcher = helpPattern.matcher(command)
 
-        val response: String = when {
-            createMatcher.find() -> {
-                val hiveNumber = createMatcher.group(1)?.toIntOrNull()
-                val payload = createMatcher.group(2)
-                if (hiveNumber != null && payload != null) {
-                    hiveLogs.getOrPut(hiveNumber) { mutableListOf() }.add(payload.trim())
-                    Log.i(TAG, "Note recorded for hive $hiveNumber. Payload: '$payload'")
-                    "Okay, note recorded for beehive $hiveNumber."
-                } else {
-                    "Sorry, I couldn't understand the hive number or the note."
-                }
-            }
-            readMatcher.find() -> {
-                val hiveNumber = readMatcher.group(1)?.toIntOrNull()
-                if (hiveNumber != null) {
-                    val logs = hiveLogs[hiveNumber]
-                    if (logs.isNullOrEmpty()) {
-                        "No notes found for beehive $hiveNumber."
+        serviceScope.launch {
+            val response: String = when {
+                createMatcher.find() -> {
+                    val hiveNumber = createMatcher.group(1)?.toIntOrNull()
+                    val payload = createMatcher.group(2)
+                    if (hiveNumber != null && payload != null) {
+                        try {
+                            val request = CreateLogRequest(hiveID = hiveNumber, content = payload.trim())
+                            val apiResponse = RetrofitClient.instance.createLog(request)
+                            if (apiResponse.isSuccessful) {
+                                "Okay, note recorded for beehive $hiveNumber."
+                            } else {
+                                "Failed to record note. Server responded with error."
+                            }
+                        } catch (e: Exception) {
+                            "Failed to record note. Error: ${e.message}"
+                        }
                     } else {
-                        "The last note is: ${logs.last()}"
+                        "Sorry, I couldn't understand the hive number or the note."
                     }
-                } else {
-                    "Sorry, I couldn't understand the hive number."
                 }
+                readMatcher.find() -> {
+                    val hiveNumber = readMatcher.group(1)?.toIntOrNull()
+                    if (hiveNumber != null) {
+                        try {
+                            val apiResponse = RetrofitClient.instance.getHive(hiveNumber)
+                            if (apiResponse.isSuccessful) {
+                                val hive = apiResponse.body()
+                                val lastLog = hive?.logs?.lastOrNull()
+                                lastLog?.content ?: "No notes found for beehive $hiveNumber."
+                            } else {
+                                "Could not find hive $hiveNumber."
+                            }
+                        } catch (e: Exception) {
+                            "Failed to get notes. Error: ${e.message}"
+                        }
+                    } else {
+                        "Sorry, I couldn't understand the hive number."
+                    }
+                }
+                taskMatcher.find() -> {
+                    val hiveNumber = taskMatcher.group(1)?.toIntOrNull()
+                    "The task feature for beehive $hiveNumber is not yet implemented."
+                }
+                helpMatcher.find() -> {
+                    "You can say things like: log for beehive 10, or, read last note for beehive 12."
+                }
+                else -> "Sorry, I didn't understand that command."
             }
-            taskMatcher.find() -> {
-                val hiveNumber = taskMatcher.group(1)?.toIntOrNull()
-                "The task feature for beehive $hiveNumber is not yet implemented."
-            }
-            helpMatcher.find() -> {
-                "You can say things like: log for beehive 10, or, read last note for beehive 12."
-            }
-            else -> "Sorry, I didn't understand that command."
+
+            speak(response, UTTERANCE_ID_COMMAND_RESPONSE)
         }
-        speak(response, UTTERANCE_ID_COMMAND_RESPONSE)
     }
 
     private fun handleCommandError(errorMsg: String) {
