@@ -12,6 +12,7 @@ import (
 	"beekeeper-api/features/hives"
 	"beekeeper-api/features/logs"
 	"beekeeper-api/features/tasks"
+	"github.com/gin-contrib/cors"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
@@ -44,6 +45,9 @@ func main() {
 
 	// Create a new Gin router
 	router := gin.Default()
+
+	//Cors
+	router.Use(cors.Default())
 
 	// API base path
 	api := router.Group("/api")

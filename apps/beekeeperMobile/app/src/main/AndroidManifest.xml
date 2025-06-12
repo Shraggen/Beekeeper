@@ -1,10 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- PERMISSIONS -->
+    <!-- Required to access the internet for API calls (e.g., Retrofit) -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Required to record audio for speech recognition -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Required to run a foreground service (for background listening) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+    <!--
+        Required for foreground services that use the microphone on Android 10 (API 29) and higher.
+        This is crucial for your service.
+    -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
 
     <application
         android:allowBackup="true"
@@ -14,20 +27,23 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.AppCompat.Light.DarkActionBar">
-
+        android:theme="@style/Theme.AppCompat.Light.DarkActionBar"
+        android:usesCleartextTraffic="true">
         <service
             android:name=".BeekeeperService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
+        <!--
+            ACTIVITY DECLARATION
+            This is the main entry point (the screen that opens) for your app.
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
