@@ -52,9 +52,10 @@ The app uses the Vosk Speech Recognition Toolkit. You need to download a languag
 2. **Place the model in the project**:  
    * After downloading, unzip the model folder.  
    * In Android Studio, switch to the **Project** view.  
-   * Navigate to app/src/main/assets/.  
+   * Navigate to model/src/main/assets/.  
    * Create a new directory inside assets named model-en-us (or as specified in BeekeeperService.kt if you changed the language).  
    * Copy the contents of your unzipped model folder into this new model-en-us directory.
+   * The full path should look like this: model/src/main/assets/model-en-us/"contents of zip"
 
 ### **3\. Set up Port Forwarding**
 
