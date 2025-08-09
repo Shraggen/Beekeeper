@@ -16,4 +16,5 @@ local.properties
 .idea/
 
 models/build
-models/src/main/assets
+models/src/main/assets/*
+!models/src/main/assets/HERE.md
