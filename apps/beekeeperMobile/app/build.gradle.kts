@@ -92,9 +92,9 @@ dependencies {
     implementation(project(":models"))
 
     // Networking libraries (aligned with versions from your working project)
-    implementation("com.squareup.retrofit2:retrofit:2.9.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation(libs.retrofit)
+    implementation(libs.converter.gson)
+    implementation(libs.kotlinx.coroutines.android)
 
     // Test dependencies
     testImplementation(libs.junit)
@@ -104,4 +104,7 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+
+    //LLM
+    implementation("com.google.mediapipe:tasks-genai:0.10.25")
 }

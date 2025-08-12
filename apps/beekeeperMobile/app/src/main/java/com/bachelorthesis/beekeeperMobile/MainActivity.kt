@@ -10,9 +10,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 
-
 class MainActivity : AppCompatActivity() {
-    private val RECORD_AUDIO_PERMISSION_CODE = 101
+    // REFACTOR: Use a single request code for all permissions for simplicity.
+    private val PERMISSIONS_REQUEST_CODE = 101
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -22,9 +22,8 @@ class MainActivity : AppCompatActivity() {
         val stopButton: Button = findViewById(R.id.buttonStopService)
 
         startButton.setOnClickListener {
-            if (checkAndRequestPermissions()) {
-                startBeekeeperService()
-            }
+            // REFACTOR: The check function now handles all required permissions.
+            checkAndRequestPermissions()
         }
 
         stopButton.setOnClickListener {
@@ -32,19 +31,29 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun checkAndRequestPermissions(): Boolean {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
+    private fun checkAndRequestPermissions() {
+        // REFACTOR: Create a list of permissions your app needs.
+        val requiredPermissions = mutableListOf<String>()
+        requiredPermissions.add(Manifest.permission.RECORD_AUDIO)
+
+        // REFACTOR: Conditionally add the notification permission ONLY for Android 13 (TIRAMISU) and up.
+        requiredPermissions.add(Manifest.permission.POST_NOTIFICATIONS)
+
+        val permissionsToRequest = requiredPermissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+
+        if (permissionsToRequest.isEmpty()) {
+            // All permissions are already granted, start the service.
+            startBeekeeperService()
+        } else {
+            // Request the permissions that have not been granted yet.
             ActivityCompat.requestPermissions(
                 this,
-                arrayOf(Manifest.permission.RECORD_AUDIO),
-                RECORD_AUDIO_PERMISSION_CODE
+                permissionsToRequest.toTypedArray(),
+                PERMISSIONS_REQUEST_CODE
             )
-            return false
         }
-        // You might need other permissions like INTERNET if STT is cloud-based
-        return true
     }
 
     override fun onRequestPermissionsResult(
@@ -53,19 +62,23 @@ class MainActivity : AppCompatActivity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == RECORD_AUDIO_PERMISSION_CODE) {
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                Toast.makeText(this, "Audio permission granted", Toast.LENGTH_SHORT).show()
+        if (requestCode == PERMISSIONS_REQUEST_CODE) {
+            // REFACTOR: Check if ALL requested permissions were granted.
+            val allPermissionsGranted = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+
+            if (allPermissionsGranted) {
+                Toast.makeText(this, "All permissions granted!", Toast.LENGTH_SHORT).show()
                 startBeekeeperService()
             } else {
-                Toast.makeText(this, "Audio permission denied", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Audio and/or Notification permissions were denied.", Toast.LENGTH_LONG).show()
             }
         }
     }
 
     private fun startBeekeeperService() {
         val serviceIntent = Intent(this, BeekeeperService::class.java)
-        startForegroundService(serviceIntent)
+        // Correctly using startForegroundService for modern Android.
+        ContextCompat.startForegroundService(this, serviceIntent)
         Toast.makeText(this, "Beekeeper service started", Toast.LENGTH_SHORT).show()
     }
 
