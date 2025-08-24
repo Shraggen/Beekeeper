@@ -1,3 +1,4 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Properties
 import java.io.FileInputStream
 
@@ -11,11 +12,12 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    id("com.google.devtools.ksp") version "2.2.10-2.0.2"
 }
 
 android {
     namespace = "com.bachelorthesis.beekeeperMobile"
-    compileSdk = 35
+    compileSdk = 36
 
     // This block is a safeguard against duplicate files in library dependencies.
     // By using the @aar dependencies below, this might not be strictly necessary,
@@ -55,14 +57,31 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+
+            buildConfigField("String", "VOSK_MODEL_URL", "\"https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip\"")
+            buildConfigField("String", "VOSK_ZIP_FILENAME", "\"vosk-model-small-en-us-0.15.zip\"")
+
+            buildConfigField("String", "LLM_MODEL_URL", "\"https://github.com/Shraggen/Beekeeper/releases/download/v1.0.0/gemma3-270m-it-q8.task\"")
+            buildConfigField("String", "LLM_MODEL_FILENAME", "\"gemma3-270m-it-q8.task\"")
+        }
+        debug {
+            buildConfigField("String", "VOSK_MODEL_URL", "\"https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip\"")
+            buildConfigField("String", "VOSK_ZIP_FILENAME", "\"vosk-model-small-en-us-0.15.zip\"")
+
+            buildConfigField("String", "LLM_MODEL_URL", "\"https://github.com/Shraggen/Beekeeper/releases/download/v1.0.0/gemma3-270m-it-q8.task\"")
+            buildConfigField("String", "LLM_MODEL_FILENAME", "\"gemma3-270m-it-q8.task\"")
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    kotlinOptions {
-        jvmTarget = "11"
+
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_11)
+        }
     }
 }
 
@@ -82,19 +101,22 @@ dependencies {
     // START OF FIX: Use explicit AAR dependencies for Vosk and JNA   //
     // This matches your working project and prevents build errors.   //
     //================================================================//
-    implementation("com.alphacephei:vosk-android:0.3.47@aar")
-    implementation("net.java.dev.jna:jna:5.14.0@aar")
+    implementation(libs.vosk.android)
     //================================================================//
     // END OF FIX                                                     //
     //================================================================//
 
-    // Local project module
-    implementation(project(":models"))
-
     // Networking libraries (aligned with versions from your working project)
-    implementation("com.squareup.retrofit2:retrofit:2.9.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation(libs.retrofit)
+    implementation(libs.converter.gson)
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.cronet.embedded)
+
+    // NEW: Room Persistence Library
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    implementation(libs.androidx.work.runtime.ktx)
+    ksp(libs.room.compiler)
 
     // Test dependencies
     testImplementation(libs.junit)
@@ -104,4 +126,7 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+
+    //LLM
+    implementation(libs.tasks.genai)
 }

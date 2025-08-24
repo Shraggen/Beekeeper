@@ -29,6 +29,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.AppCompat.Light.DarkActionBar"
         android:usesCleartextTraffic="true">
+        <!--Remove the true in production^^-->
         <service
             android:name=".BeekeeperService"
             android:exported="false"

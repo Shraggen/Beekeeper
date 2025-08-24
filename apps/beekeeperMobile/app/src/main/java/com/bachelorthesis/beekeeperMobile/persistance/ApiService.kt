@@ -1,8 +1,5 @@
-package com.bachelorthesis.beekeeperMobile
+package com.bachelorthesis.beekeeperMobile.persistance
 
-import com.bachelorthesis.beekeeperMobile.models.CreateLogRequest
-import com.bachelorthesis.beekeeperMobile.models.Log
-import com.bachelorthesis.beekeeperMobile.models.Task
 import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
