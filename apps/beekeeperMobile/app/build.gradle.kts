@@ -16,7 +16,7 @@ plugins {
 
 android {
     namespace = "com.bachelorthesis.beekeeperMobile"
-    compileSdk = 35
+    compileSdk = 36
 
     // This block is a safeguard against duplicate files in library dependencies.
     // By using the @aar dependencies below, this might not be strictly necessary,
@@ -101,7 +101,6 @@ dependencies {
     // This matches your working project and prevents build errors.   //
     //================================================================//
     implementation(libs.vosk.android)
-    implementation(libs.jna)
     //================================================================//
     // END OF FIX                                                     //
     //================================================================//
