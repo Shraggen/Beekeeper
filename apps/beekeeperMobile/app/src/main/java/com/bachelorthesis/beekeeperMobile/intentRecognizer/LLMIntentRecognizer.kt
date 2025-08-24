@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.File
+import java.util.Locale
 
 class LLMIntentRecognizer : IntentRecognizer {
 
@@ -37,14 +38,16 @@ class LLMIntentRecognizer : IntentRecognizer {
         }
     }
 
-    override fun recognizeIntent(text: String, onResult: (intent: StructuredIntent) -> Unit) {
+    // MODIFIED: Implemented new signature
+    override fun recognizeIntent(text: String, locale: Locale, onResult: (intent: StructuredIntent) -> Unit) {
         if (llmInference == null) {
             onResult(StructuredIntent.UNKNOWN)
             return
         }
         scope.launch {
             try {
-                val prompt = buildPromptFor(text)
+                // The prompt is now multilingual by default
+                val prompt = buildMultilingualPromptFor(text)
                 val response = llmInference?.generateResponse(prompt)
                 val intent = parseLlmResponse(response)
                 onResult(intent)
@@ -55,24 +58,34 @@ class LLMIntentRecognizer : IntentRecognizer {
         }
     }
 
-    /**
-     * MODIFIED: A much more robust prompt with system instructions and an escape hatch.
-     */
-    private fun buildPromptFor(text: String): String {
+    // RENAMED & MODIFIED: The prompt now includes Serbian examples.
+    private fun buildMultilingualPromptFor(text: String): String {
         return """
-        You are a highly intelligent JSON formatting API. Your ONLY job is to analyze the user's text and convert it into a specific JSON format.
+        You are a highly intelligent JSON formatting API. Your ONLY job is to analyze the user's text and convert it into a specific JSON format. You must handle both English and Serbian input.
 
         **Instructions:**
         - The possible intents are: 'create_log', 'read_last_log', 'read_last_task'.
         - You must extract 'hive_id' (a number) and 'content' (the note).
         - Your entire response must be ONLY the JSON object, with no other text or formatting.
 
-        **Examples:**
+        **English Examples:**
         1. User Text: "create a note for beehive 10 that says the queen is healthy"
            Your JSON Response: {"intent":"create_log","entities":{"hive_id":"10","content":"the queen is healthy"}}
         2. User Text: "read last note for hive 5"
            Your JSON Response: {"intent":"read_last_log","entities":{"hive_id":"5"}}
-        3. User Text: "what's the weather like"
+        3. User Text: "what's the last task for beehive 12"
+           Your JSON Response: {"intent":"read_last_task","entities":{"hive_id":"12"}}
+
+        **Serbian (Srpski) Examples:**
+        1. User Text: "beleška za košnicu 7 matica je viđena i zdrava"
+           Your JSON Response: {"intent":"create_log","entities":{"hive_id":"7","content":"matica je viđena i zdrava"}}
+        2. User Text: "pročitaj poslednju belešku za košnicu 3"
+           Your JSON Response: {"intent":"read_last_log","entities":{"hive_id":"3"}}
+        3. User Text: "koji je zadnji zadatak za košnicu 21"
+           Your JSON Response: {"intent":"read_last_task","entities":{"hive_id":"21"}}
+
+        **Unknown Example:**
+        1. User Text: "what's the weather like"
            Your JSON Response: {"intent":"unknown","entities":{}}
 
         **User Text to Process:**

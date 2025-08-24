@@ -8,7 +8,7 @@ import android.os.Looper
 import android.speech.RecognitionListener as AndroidRecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
-import android.util.Log
+import android.util.Log as AndroidLog // Alias for Android's Log to avoid conflict
 import org.json.JSONObject
 import org.vosk.Model
 import org.vosk.Recognizer
@@ -30,13 +30,19 @@ class SpeechEngine(
     private var voskSpeechService: SpeechService? = null
     private lateinit var recognizerIntent: Intent
 
-    private enum class State { STOPPED, INITIALIZING, IDLE, LISTENING_COMMAND }
     @Volatile private var currentState = State.STOPPED
     private var isRetryAttempted = false
 
-    fun initialize(modelPath: String, onInitialized: (success: Boolean) -> Unit) {
+    // NEW: Store the preferred language
+    private var preferredLocale: Locale = Locale.getDefault() // Default to device locale
+
+    private enum class State { STOPPED, INITIALIZING, IDLE, LISTENING_COMMAND }
+
+    // MODIFIED: Accepts preferredLocale
+    fun initialize(modelPath: String, preferredLocale: Locale, onInitialized: (success: Boolean) -> Unit) {
         if (currentState != State.STOPPED) return
         currentState = State.INITIALIZING
+        this.preferredLocale = preferredLocale // Store the provided locale
 
         try {
             val modelFile = File(modelPath)
@@ -47,19 +53,19 @@ class SpeechEngine(
             }
 
             this.voskModel = Model(modelPath)
-            Log.d(TAG, "Vosk model initialized directly from path: $modelPath")
+            AndroidLog.d(TAG, "Vosk model initialized directly from path: $modelPath")
 
             mainHandler.post {
-                // MODIFIED: Create a robust recognizer that prefers Google but falls back gracefully.
                 androidSpeechRecognizer = createRobustSpeechRecognizer()
                 androidSpeechRecognizer?.setRecognitionListener(this)
 
-                // Prepare the intent once, so we can reuse it for retries.
+                // MODIFIED: Use preferredLocale here
                 recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, preferredLocale.toLanguageTag()) // Use the stored preferred locale
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-                    putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+                    // Note: EXTRA_PREFER_OFFLINE is intentionally left out as per ADR-003
+                    // The Android SpeechRecognizer will decide whether to use online or offline based on its own logic and language pack availability.
                 }
 
                 onInitialized(true)
@@ -70,11 +76,6 @@ class SpeechEngine(
         }
     }
 
-    /**
-     * NEW: Creates the best available SpeechRecognizer.
-     * It actively looks for the Google Recognizer, which is generally the most accurate.
-     * If not found, it falls back to the device's default (e.g., Samsung's service).
-     */
     private fun createRobustSpeechRecognizer(): SpeechRecognizer {
         val pm = context.packageManager
         val services = pm.queryIntentServices(Intent(android.speech.RecognitionService.SERVICE_INTERFACE), 0)
@@ -82,10 +83,10 @@ class SpeechEngine(
         val googleService = services.find { it.serviceInfo.packageName == GOOGLE_RECOGNIZER_PACKAGE }
 
         return if (googleService != null) {
-            Log.i(TAG, "Found Google Speech Recognizer. Using it as primary.")
+            AndroidLog.i(TAG, "Found Google Speech Recognizer. Using it as primary.")
             SpeechRecognizer.createSpeechRecognizer(context, android.content.ComponentName(googleService.serviceInfo.packageName, googleService.serviceInfo.name))
         } else {
-            Log.w(TAG, "Google Speech Recognizer not found. Falling back to device default.")
+            AndroidLog.w(TAG, "Google Speech Recognizer not found. Falling back to device default.")
             SpeechRecognizer.createSpeechRecognizer(context)
         }
     }
@@ -97,24 +98,28 @@ class SpeechEngine(
             androidSpeechRecognizer?.cancel()
             voskSpeechService?.stop()
             try {
+                // Vosk hotword is typically language-agnostic or uses a very simple model
+                // The current hotword "hey beekeeper" is simple enough not to require specific language model selection for Vosk itself.
                 val recognizer = Recognizer(voskModel, 16000.0f, "[\"hey beekeeper\", \"[unk]\"]")
                 voskSpeechService = SpeechService(recognizer, 16000.0f)
                 voskSpeechService?.startListening(this)
-                Log.i(TAG, "Vosk is now listening for hotword.")
+                AndroidLog.i(TAG, "Vosk is now listening for hotword.")
             } catch (e: IOException) {
                 listener.onError("Error starting Vosk: ${e.message}")
             }
         }
     }
 
+    // REMOVED: Locale parameter from startListeningForCommand - it's now set during initialization
     fun startListeningForCommand() {
         mainHandler.post {
             currentState = State.LISTENING_COMMAND
             voskSpeechService?.stop()
             voskSpeechService = null
 
+            // The recognizerIntent already has the preferredLocale set during initialize
             androidSpeechRecognizer?.startListening(recognizerIntent)
-            Log.i(TAG, "Android SpeechRecognizer is now listening for a command.")
+            AndroidLog.i(TAG, "Android SpeechRecognizer is now listening for a command in ${preferredLocale.toLanguageTag()}.")
         }
     }
 
@@ -140,7 +145,7 @@ class SpeechEngine(
     override fun onFinalResult(hypothesis: String?) {}
     override fun onPartialResult(hypothesis: String?) {}
     override fun onError(e: Exception?) { listener.onError("Vosk error: ${e?.message}") }
-    override fun onTimeout() { Log.w(TAG, "Vosk timeout.") }
+    override fun onTimeout() { AndroidLog.w(TAG, "Vosk timeout.") }
 
     // --- AndroidRecognitionListener Implementation ---
     override fun onResults(results: Bundle?) {
@@ -153,30 +158,22 @@ class SpeechEngine(
 
     override fun onPartialResults(partialResults: Bundle?) {}
 
-    /**
-     * MODIFIED: Implements the graceful retry logic for spurious errors.
-     */
     override fun onError(error: Int) {
-        // Handle the specific, one-time "language unavailable" error by retrying once.
         if (error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE && !isRetryAttempted) {
             isRetryAttempted = true
-            Log.w(TAG, "Got spurious ERROR_LANGUAGE_UNAVAILABLE (14). Retrying once after a short delay...")
+            AndroidLog.w(TAG, "Got spurious ERROR_LANGUAGE_UNAVAILABLE (14). Retrying once after a short delay...")
             mainHandler.postDelayed({
                 androidSpeechRecognizer?.startListening(recognizerIntent)
             }, 500) // 500ms delay for the service to finish booting
             return
         }
 
-        // For all other errors, or if the retry fails, report it and go back to hotword listening.
-        Log.e(TAG, "AndroidSR Error: $error. Returning to hotword listening.")
+        AndroidLog.e(TAG, "AndroidSR Error: $error. Returning to hotword listening.")
         startListeningForHotword()
     }
 
-    /**
-     * MODIFIED: Reset the retry flag every time speech is successfully ready.
-     */
     override fun onReadyForSpeech(params: Bundle?) {
-        Log.d(TAG, "AndroidSR: Ready for speech.")
+        AndroidLog.d(TAG, "AndroidSR: Ready for speech.")
         isRetryAttempted = false // Reset the retry flag for the next command cycle.
     }
 

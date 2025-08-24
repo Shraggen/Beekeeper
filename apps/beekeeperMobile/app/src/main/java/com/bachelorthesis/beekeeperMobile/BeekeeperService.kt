@@ -11,6 +11,7 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log as AndroidLog // Alias for Android's Log to avoid conflict
 import androidx.core.app.NotificationCompat
+import androidx.preference.PreferenceManager
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
@@ -64,6 +65,8 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
 
     private var pendingIntent: StructuredIntent? = null
 
+    private lateinit var preferredLocale: Locale
+
     //region Service Lifecycle
     override fun onCreate() {
         super.onCreate()
@@ -78,6 +81,11 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
             handleError("AI models not found. Please run the app's main screen to download them.", true)
             return
         }
+
+        val sharedPrefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val languageTag = sharedPrefs.getString("preferred_language", "en-US") ?: "en-US"
+        preferredLocale = Locale.forLanguageTag(languageTag)
+        AndroidLog.d(TAG, "Service started with preferred language: ${preferredLocale.toLanguageTag()}")
 
         serviceScope.launch {
             // NEW: Initialize Database, API Service, and Repository
@@ -121,7 +129,7 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
     private fun initializeSpeechEngine() {
         speechEngine = SpeechEngine(this, this).apply {
             val voskPath = assetManager.getVoskModelPath().absolutePath
-            initialize(voskPath) { success ->
+            initialize(voskPath, preferredLocale) { success ->
                 if (success) {
                     AndroidLog.d(TAG, "Speech Engine Initialized successfully.")
                     isSpeechEngineReady = true
@@ -164,7 +172,7 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            textToSpeech?.language = Locale.US
+            textToSpeech?.language = preferredLocale
             textToSpeech?.setOnUtteranceProgressListener(ttsListener)
             isTtsReady = true
             checkInitializationComplete()
@@ -198,7 +206,7 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
     override fun onHotwordDetected() {
         if (currentState == ServiceState.IDLE) {
             transitionToState(ServiceState.AWOKEN)
-            speak("Yes?", UTTERANCE_ID_PROMPT_FOR_COMMAND)
+            speak(getString(R.string.tts_response_yes), UTTERANCE_ID_PROMPT_FOR_COMMAND) // MODIFIED
         }
     }
 
@@ -208,8 +216,8 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
         } else {
             AndroidLog.i(TAG, "Command received: '$text'. Sending to LLM.")
             transitionToState(ServiceState.PROCESSING)
-            speak("Processing", UTTERANCE_ID_PROMPT_FOR_COMMAND) // Speak "Processing" as feedback
-            intentRecognizer?.recognizeIntent(text, ::processStructuredIntent)
+            speak(getString(R.string.tts_response_processing), UTTERANCE_ID_PROMPT_FOR_COMMAND) // MODIFIED
+            intentRecognizer?.recognizeIntent(text, preferredLocale, ::processStructuredIntent)
         }
     }
 
@@ -255,9 +263,7 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
     }
 
     private fun processStructuredIntent(intent: StructuredIntent) {
-        AndroidLog.d(TAG, "Processing Intent: ${intent.intentName} with entities: ${intent.entities}")
-        transitionToState(ServiceState.PROCESSING) // Keep processing state while intent is handled
-
+        // ...
         when (intent.intentName) {
             "create_log" -> {
                 val hiveId = intent.entities["hive_id"]?.toIntOrNull()
@@ -266,9 +272,11 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
                     saveNoteForHive(hiveId, content)
                 } else if (hiveId != null) {
                     this.pendingIntent = intent
-                    speak("Okay, I'm ready to record your note for beehive $hiveId", UTTERANCE_ID_PROMPT_FOR_NOTE)
+                    // MODIFIED: Use formatted string resource
+                    val response = getString(R.string.tts_response_ready_to_record, hiveId)
+                    speak(response, UTTERANCE_ID_PROMPT_FOR_NOTE)
                 } else {
-                    speak("Sorry, I didn't catch the hive number for that note.", UTTERANCE_ID_COMMAND_RESPONSE)
+                    speak(getString(R.string.tts_error_no_hive_number_note), UTTERANCE_ID_COMMAND_RESPONSE) // MODIFIED
                 }
             }
             "read_last_log" -> {
@@ -276,7 +284,7 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
                 if (hiveId != null) {
                     fetchLastLog(hiveId)
                 } else {
-                    speak("Sorry, I couldn't understand which hive number you wanted the last log for.", UTTERANCE_ID_COMMAND_RESPONSE)
+                    speak(getString(R.string.tts_error_no_hive_number_log), UTTERANCE_ID_COMMAND_RESPONSE) // MODIFIED
                 }
             }
             "read_last_task" -> {
@@ -284,11 +292,11 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
                 if (hiveId != null) {
                     fetchLastTask(hiveId)
                 } else {
-                    speak("Sorry, I couldn't understand which hive number you wanted the last task for.", UTTERANCE_ID_COMMAND_RESPONSE)
+                    speak(getString(R.string.tts_error_no_hive_number_task), UTTERANCE_ID_COMMAND_RESPONSE) // MODIFIED
                 }
             }
             else -> {
-                speak("Sorry, I didn't understand that command. You can ask me to create a log or read the last log or task.", UTTERANCE_ID_COMMAND_RESPONSE)
+                speak(getString(R.string.tts_error_unknown_command), UTTERANCE_ID_COMMAND_RESPONSE) // MODIFIED
             }
         }
     }
@@ -315,7 +323,8 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
                 // Save locally first
                 val localLogEntry = logRepository.createLog(hiveId, content)
                 AndroidLog.d(TAG, "Note saved locally for beehive $hiveId, local ID: ${localLogEntry.id}")
-                speak("Note saved for beehive $hiveId", UTTERANCE_ID_COMMAND_RESPONSE)
+                val response = getString(R.string.tts_response_note_saved, hiveId) // MODIFIED
+                speak(response, UTTERANCE_ID_COMMAND_RESPONSE)
                 // The WorkManager will handle syncing this to the backend later.
             } catch (e: Exception) {
                 handleError("There was an error saving the note locally: ${e.message}", false)
@@ -333,9 +342,9 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
             try {
                 val remoteLog = logRepository.fetchLastLogFromRemote(hiveId)
                 val responseText = if (remoteLog != null && remoteLog.content.isNotEmpty()) {
-                    "The last note is: ${remoteLog.content}"
+                    getString(R.string.tts_response_last_note_is, remoteLog.content) // MODIFIED
                 } else {
-                    "No notes found for beehive $hiveId."
+                    getString(R.string.tts_response_no_notes_found, hiveId) // MODIFIED
                 }
                 speak(responseText, UTTERANCE_ID_COMMAND_RESPONSE)
             } catch (e: Exception) {
@@ -354,9 +363,9 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
             try {
                 val remoteTask = logRepository.fetchLastTaskFromRemote(hiveId)
                 val responseText = if (remoteTask != null && remoteTask.content.isNotEmpty()) {
-                    "The last task is: ${remoteTask.content}"
+                    getString(R.string.tts_response_last_task_is, remoteTask.content) // MODIFIED
                 } else {
-                    "No tasks found for beehive $hiveId."
+                    getString(R.string.tts_response_no_tasks_found, hiveId) // MODIFIED
                 }
                 speak(responseText, UTTERANCE_ID_COMMAND_RESPONSE)
             } catch (e: Exception) {
@@ -368,7 +377,8 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
     private fun handleError(errorMessage: String, isFatal: Boolean) {
         AndroidLog.e(TAG, "ERROR: $errorMessage (isFatal: $isFatal)")
         if (!isFatal) {
-            speak("There was an error: $errorMessage", UTTERANCE_ID_COMMAND_RESPONSE)
+            val response = getString(R.string.tts_error_generic, errorMessage) // MODIFIED
+            speak(response, UTTERANCE_ID_COMMAND_RESPONSE)
         } else {
             stopSelf()
         }

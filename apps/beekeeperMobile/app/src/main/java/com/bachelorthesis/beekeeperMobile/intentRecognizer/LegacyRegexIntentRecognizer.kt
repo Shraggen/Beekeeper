@@ -2,6 +2,7 @@ package com.bachelorthesis.beekeeperMobile.intentRecognizer
 
 import android.content.Context
 import android.util.Log
+import java.util.Locale
 
 /**
  * A legacy intent recognizer that uses simple string matching (regex-like)
@@ -16,48 +17,49 @@ class RegexIntentRecognizer : IntentRecognizer {
         onInitialized(true)
     }
 
-    override fun recognizeIntent(text: String, onResult: (intent: StructuredIntent) -> Unit) {
-        // This is a synchronous operation, so we can determine the result immediately.
+    // MODIFIED: Implemented new signature and added logic for Serbian
+    override fun recognizeIntent(text: String, locale: Locale, onResult: (intent: StructuredIntent) -> Unit) {
         val lowerCaseText = text.lowercase().trim()
 
-        val intent = when {
-            // Check for the "create log" command
-            lowerCaseText.startsWith(CMD_CREATE_PREFIX) -> {
-                val entity = lowerCaseText.substring(CMD_CREATE_PREFIX.length).trim()
-                StructuredIntent(
-                    intentName = "create_log",
-                    entities = mapOf("hive_id" to entity)
-                )
+        val intent = if (locale.language == "sr") {
+            // Serbian Commands
+            when {
+                lowerCaseText.startsWith(CMD_CREATE_PREFIX_SR) -> {
+                    val entity = lowerCaseText.substring(CMD_CREATE_PREFIX_SR.length).trim()
+                    StructuredIntent("create_log", mapOf("hive_id" to entity))
+                }
+                lowerCaseText.startsWith(CMD_READ_LOG_PREFIX_SR) -> {
+                    val entity = lowerCaseText.substring(CMD_READ_LOG_PREFIX_SR.length).trim()
+                    StructuredIntent("read_last_log", mapOf("hive_id" to entity))
+                }
+                lowerCaseText.startsWith(CMD_READ_TASK_PREFIX_SR) -> {
+                    val entity = lowerCaseText.substring(CMD_READ_TASK_PREFIX_SR.length).trim()
+                    StructuredIntent("read_last_task", mapOf("hive_id" to entity))
+                }
+                else -> StructuredIntent.UNKNOWN
             }
-
-            // Check for the "read last log" command
-            lowerCaseText.startsWith(CMD_READ_LOG_PREFIX) -> {
-                val entity = lowerCaseText.substring(CMD_READ_LOG_PREFIX.length).trim()
-                StructuredIntent(
-                    intentName = "read_last_log",
-                    entities = mapOf("hive_id" to entity)
-                )
+        } else {
+            // English Commands (default)
+            when {
+                lowerCaseText.startsWith(CMD_CREATE_PREFIX_EN) -> {
+                    val entity = lowerCaseText.substring(CMD_CREATE_PREFIX_EN.length).trim()
+                    StructuredIntent("create_log", mapOf("hive_id" to entity))
+                }
+                lowerCaseText.startsWith(CMD_READ_LOG_PREFIX_EN) -> {
+                    val entity = lowerCaseText.substring(CMD_READ_LOG_PREFIX_EN.length).trim()
+                    StructuredIntent("read_last_log", mapOf("hive_id" to entity))
+                }
+                lowerCaseText.startsWith(CMD_READ_TASK_PREFIX_EN) -> {
+                    val entity = lowerCaseText.substring(CMD_READ_TASK_PREFIX_EN.length).trim()
+                    StructuredIntent("read_last_task", mapOf("hive_id" to entity))
+                }
+                lowerCaseText == CMD_HELP_1_EN || lowerCaseText == CMD_HELP_2_EN -> {
+                    StructuredIntent("help")
+                }
+                else -> StructuredIntent.UNKNOWN
             }
-
-            // Check for the "read last task" command
-            lowerCaseText.startsWith(CMD_READ_TASK_PREFIX) -> {
-                val entity = lowerCaseText.substring(CMD_READ_TASK_PREFIX.length).trim()
-                StructuredIntent(
-                    intentName = "read_last_task",
-                    entities = mapOf("hive_id" to entity)
-                )
-            }
-
-            // Check for help commands
-            lowerCaseText == CMD_HELP_1 || lowerCaseText == CMD_HELP_2 -> {
-                StructuredIntent(intentName = "help")
-            }
-
-            // If no match is found, return the UNKNOWN intent.
-            else -> StructuredIntent.UNKNOWN
         }
 
-        // Return the result via the callback.
         onResult(intent)
     }
 
@@ -68,10 +70,16 @@ class RegexIntentRecognizer : IntentRecognizer {
 
     // Companion object to hold the command constants, keeping them self-contained.
     companion object {
-        private const val CMD_CREATE_PREFIX = "note for beehive"
-        private const val CMD_READ_LOG_PREFIX = "last note for beehive"
-        private const val CMD_READ_TASK_PREFIX = "last task for beehive"
-        private const val CMD_HELP_1 = "help"
-        private const val CMD_HELP_2 = "what can i say"
+        // English
+        private const val CMD_CREATE_PREFIX_EN = "note for beehive"
+        private const val CMD_READ_LOG_PREFIX_EN = "last note for beehive"
+        private const val CMD_READ_TASK_PREFIX_EN = "last task for beehive"
+        private const val CMD_HELP_1_EN = "help"
+        private const val CMD_HELP_2_EN = "what can i say"
+
+        // Serbian
+        private const val CMD_CREATE_PREFIX_SR = "beleška za košnicu" // "note for hive"
+        private const val CMD_READ_LOG_PREFIX_SR = "zadnja beleška za košnicu" // "last note for hive"
+        private const val CMD_READ_TASK_PREFIX_SR = "zadnji zadatak za košnicu" // "last task for hive"
     }
 }

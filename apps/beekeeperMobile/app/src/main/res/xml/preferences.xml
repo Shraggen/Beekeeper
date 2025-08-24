@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.preference.PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory app:title="@string/settings_category_language">
+        <ListPreference
+            app:key="preferred_language"
+            app:title="@string/settings_language_title"
+            app:summary="@string/settings_language_summary"
+            app:entries="@array/language_entries"
+            app:entryValues="@array/language_entry_values"
+            app:defaultValue="en-US" /> <!-- Default to English (US) -->
+    </PreferenceCategory>
+
+</androidx.preference.PreferenceScreen>
