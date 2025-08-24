@@ -9,23 +9,32 @@ import android.content.Intent
 import android.os.IBinder
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
-import android.util.Log
+import android.util.Log as AndroidLog // Alias for Android's Log to avoid conflict
 import androidx.core.app.NotificationCompat
+import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import com.bachelorthesis.beekeeperMobile.assetManager.AssetManager
 import com.bachelorthesis.beekeeperMobile.intentRecognizer.IntentRecognizer
 import com.bachelorthesis.beekeeperMobile.intentRecognizer.LLMIntentRecognizer
 import com.bachelorthesis.beekeeperMobile.intentRecognizer.RegexIntentRecognizer
 import com.bachelorthesis.beekeeperMobile.intentRecognizer.StructuredIntent
-import com.bachelorthesis.beekeeperMobile.persistance.CreateLogRequest
-import com.bachelorthesis.beekeeperMobile.persistance.RetrofitClient
+import com.bachelorthesis.beekeeperMobile.persistance.AppDatabase // NEW
+import com.bachelorthesis.beekeeperMobile.persistance.ApiService // NEW
+import com.bachelorthesis.beekeeperMobile.persistance.LogRepository // NEW
+import com.bachelorthesis.beekeeperMobile.persistance.RetrofitClient // NEW
 import com.bachelorthesis.beekeeperMobile.speechEngine.SpeechEngine
 import com.bachelorthesis.beekeeperMobile.speechEngine.SpeechEngineListener
+import com.bachelorthesis.beekeeperMobile.sync.SyncWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineListener {
 
@@ -36,6 +45,11 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
     private var textToSpeech: TextToSpeech? = null
     private lateinit var assetManager: AssetManager
 
+    // NEW: Database and Repository instances
+    private lateinit var appDatabase: AppDatabase
+    private lateinit var apiService: ApiService
+    private lateinit var logRepository: LogRepository
+
     private enum class ServiceState {
         STOPPED, INITIALIZING, IDLE, AWOKEN, AWAITING_NOTE, PROCESSING, SPEAKING
     }
@@ -44,29 +58,64 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
     private var isTtsReady = false
     private var isIntentRecognizerReady = false
     private var isSpeechEngineReady = false
+    private var isDatabaseReady = false // NEW: Track database readiness
+    private var isRepositoryReady = false // NEW: Track repository readiness
+
 
     private var pendingIntent: StructuredIntent? = null
 
     //region Service Lifecycle
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "Service Creating...")
+        AndroidLog.d(TAG, "Service Creating...")
         setupNotificationChannel()
         transitionToState(ServiceState.INITIALIZING)
 
         assetManager = AssetManager(this)
 
         if (!assetManager.checkPrerequisites()) {
-            Log.e(TAG, "Prerequisites not met. Models are not available.")
+            AndroidLog.e(TAG, "Prerequisites not met. Models are not available.")
             handleError("AI models not found. Please run the app's main screen to download them.", true)
             return
         }
 
         serviceScope.launch {
+            // NEW: Initialize Database, API Service, and Repository
+            appDatabase = AppDatabase.getDatabase(applicationContext)
+            apiService = RetrofitClient.instance // Reusing the singleton Retrofit instance
+            logRepository = LogRepository(appDatabase.logDao(), apiService)
+            isDatabaseReady = true
+            isRepositoryReady = true
+            AndroidLog.d(TAG, "Database and Repository initialized.")
+
             textToSpeech = TextToSpeech(this@BeekeeperService, this@BeekeeperService)
             initializeIntentRecognizerWithFallback()
             initializeSpeechEngine()
+
+            checkInitializationComplete() // Re-check after DB/Repo are ready
+            scheduleLogSyncWorker()
         }
+    }
+
+
+    private fun scheduleLogSyncWorker() {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED) // Only run when network is available
+            .build()
+
+        val periodicSyncRequest = PeriodicWorkRequestBuilder<SyncWorker>(
+            repeatInterval = 1, // Repeat every 1 hour (minimum allowed by WorkManager is 15 minutes)
+            repeatIntervalTimeUnit = TimeUnit.HOURS
+        )
+            .setConstraints(constraints)
+            .build()
+
+        WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
+            SyncWorker.WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP, // Keep existing work if already scheduled
+            periodicSyncRequest
+        )
+        AndroidLog.d(TAG, "Log synchronization worker scheduled.")
     }
 
     private fun initializeSpeechEngine() {
@@ -74,7 +123,7 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
             val voskPath = assetManager.getVoskModelPath().absolutePath
             initialize(voskPath) { success ->
                 if (success) {
-                    Log.d(TAG, "Speech Engine Initialized successfully.")
+                    AndroidLog.d(TAG, "Speech Engine Initialized successfully.")
                     isSpeechEngineReady = true
                     checkInitializationComplete()
                 } else {
@@ -85,7 +134,7 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
     }
 
     private fun initializeIntentRecognizerWithFallback() {
-        Log.i(TAG, "Attempting to initialize LLM Intent Recognizer...")
+        AndroidLog.i(TAG, "Attempting to initialize LLM Intent Recognizer...")
         val llmRecognizer = LLMIntentRecognizer()
         val llmPath = assetManager.getLlmModelPath().absolutePath
 
@@ -95,7 +144,7 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
                 isIntentRecognizerReady = true
                 checkInitializationComplete()
             } else {
-                Log.w(TAG, "LLM Recognizer failed to initialize. Falling back to Regex Recognizer.")
+                AndroidLog.w(TAG, "LLM Recognizer failed to initialize. Falling back to Regex Recognizer.")
                 llmRecognizer.close()
                 val regexRecognizer = RegexIntentRecognizer()
                 regexRecognizer.initialize(this) {
@@ -125,8 +174,9 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
     }
 
     private fun checkInitializationComplete() {
-        if (isTtsReady && isIntentRecognizerReady && isSpeechEngineReady) {
-            Log.i(TAG, "All components initialized. Service is now idle and ready.")
+        // NEW: Include database and repository readiness in overall check
+        if (isTtsReady && isIntentRecognizerReady && isSpeechEngineReady && isDatabaseReady && isRepositoryReady) {
+            AndroidLog.i(TAG, "All components initialized. Service is now idle and ready.")
             transitionToState(ServiceState.IDLE)
             speechEngine?.startListeningForHotword()
         }
@@ -134,12 +184,13 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
 
     override fun onDestroy() {
         super.onDestroy()
-        Log.d(TAG, "Service Destroying...")
+        AndroidLog.d(TAG, "Service Destroying...")
         serviceScope.cancel()
         speechEngine?.destroy()
         intentRecognizer?.close()
         textToSpeech?.stop()
         textToSpeech?.shutdown()
+        // No explicit shutdown for Room database needed, as it's typically managed by the app process.
     }
     //endregion
 
@@ -155,9 +206,9 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
         if (currentState == ServiceState.AWAITING_NOTE) {
             saveNoteFromPendingIntent(text)
         } else {
-            Log.i(TAG, "Command received: '$text'. Sending to LLM.")
+            AndroidLog.i(TAG, "Command received: '$text'. Sending to LLM.")
             transitionToState(ServiceState.PROCESSING)
-            speak("Processing", UTTERANCE_ID_PROMPT_FOR_COMMAND)
+            speak("Processing", UTTERANCE_ID_PROMPT_FOR_COMMAND) // Speak "Processing" as feedback
             intentRecognizer?.recognizeIntent(text, ::processStructuredIntent)
         }
     }
@@ -198,14 +249,14 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
 
     private fun transitionToState(newState: ServiceState) {
         if (currentState == newState) return
-        Log.i(TAG, "State Transition: $currentState -> $newState")
+        AndroidLog.i(TAG, "State Transition: $currentState -> $newState")
         currentState = newState
         updateNotification()
     }
 
     private fun processStructuredIntent(intent: StructuredIntent) {
-        Log.d(TAG, "Processing Intent: ${intent.intentName} with entities: ${intent.entities}")
-        transitionToState(ServiceState.PROCESSING)
+        AndroidLog.d(TAG, "Processing Intent: ${intent.intentName} with entities: ${intent.entities}")
+        transitionToState(ServiceState.PROCESSING) // Keep processing state while intent is handled
 
         when (intent.intentName) {
             "create_log" -> {
@@ -252,57 +303,70 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
         pendingIntent = null
     }
 
+    // MODIFIED: Uses LogRepository for local persistence
     private fun saveNoteForHive(hiveId: Int, content: String) {
         transitionToState(ServiceState.PROCESSING)
         serviceScope.launch {
+            if (!::logRepository.isInitialized) { // Basic check for repository readiness
+                handleError("Log repository not initialized, cannot save note.", false)
+                return@launch
+            }
             try {
-                val request = CreateLogRequest(hiveID = hiveId, content = content)
-                val response = RetrofitClient.instance.createLog(request)
-                if (response.isSuccessful) {
-                    speak("Note saved for beehive $hiveId", UTTERANCE_ID_COMMAND_RESPONSE)
-                } else {
-                    handleError("The server had an error saving the note.", false)
-                }
+                // Save locally first
+                val localLogEntry = logRepository.createLog(hiveId, content)
+                AndroidLog.d(TAG, "Note saved locally for beehive $hiveId, local ID: ${localLogEntry.id}")
+                speak("Note saved for beehive $hiveId", UTTERANCE_ID_COMMAND_RESPONSE)
+                // The WorkManager will handle syncing this to the backend later.
             } catch (e: Exception) {
-                handleError("There was a network error trying to save the note.", false)
+                handleError("There was an error saving the note locally: ${e.message}", false)
             }
         }
     }
 
+    // MODIFIED: Uses LogRepository to fetch from remote
     private fun fetchLastLog(hiveId: Int) {
         serviceScope.launch {
+            if (!::logRepository.isInitialized) {
+                handleError("Log repository not initialized, cannot fetch log.", false)
+                return@launch
+            }
             try {
-                val response = RetrofitClient.instance.getLastLogForHive(hiveId)
-                val responseText = if (response.isSuccessful && !response.body()?.content.isNullOrEmpty()) {
-                    "The last note is: ${response.body()?.content}"
+                val remoteLog = logRepository.fetchLastLogFromRemote(hiveId)
+                val responseText = if (remoteLog != null && remoteLog.content.isNotEmpty()) {
+                    "The last note is: ${remoteLog.content}"
                 } else {
                     "No notes found for beehive $hiveId."
                 }
                 speak(responseText, UTTERANCE_ID_COMMAND_RESPONSE)
             } catch (e: Exception) {
-                handleError("Network error while getting notes.", false)
+                handleError("Network error while getting notes: ${e.message}", false)
             }
         }
     }
 
+    // MODIFIED: Uses LogRepository to fetch from remote
     private fun fetchLastTask(hiveId: Int) {
         serviceScope.launch {
+            if (!::logRepository.isInitialized) {
+                handleError("Log repository not initialized, cannot fetch task.", false)
+                return@launch
+            }
             try {
-                val response = RetrofitClient.instance.getLastTaskForHive(hiveId)
-                val responseText = if (response.isSuccessful && !response.body()?.content.isNullOrEmpty()) {
-                    "The last task is: ${response.body()?.content}"
+                val remoteTask = logRepository.fetchLastTaskFromRemote(hiveId)
+                val responseText = if (remoteTask != null && remoteTask.content.isNotEmpty()) {
+                    "The last task is: ${remoteTask.content}"
                 } else {
                     "No tasks found for beehive $hiveId."
                 }
                 speak(responseText, UTTERANCE_ID_COMMAND_RESPONSE)
             } catch (e: Exception) {
-                handleError("Network error while getting tasks.", false)
+                handleError("Network error while getting tasks: ${e.message}", false)
             }
         }
     }
 
     private fun handleError(errorMessage: String, isFatal: Boolean) {
-        Log.e(TAG, "ERROR: $errorMessage (isFatal: $isFatal)")
+        AndroidLog.e(TAG, "ERROR: $errorMessage (isFatal: $isFatal)")
         if (!isFatal) {
             speak("There was an error: $errorMessage", UTTERANCE_ID_COMMAND_RESPONSE)
         } else {
