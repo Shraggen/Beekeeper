@@ -21,4 +21,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "Beekeeper"
-include(":app", ":models")
+include(":app")

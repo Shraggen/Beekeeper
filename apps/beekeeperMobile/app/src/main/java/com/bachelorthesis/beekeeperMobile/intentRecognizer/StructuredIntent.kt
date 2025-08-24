@@ -1,4 +1,4 @@
-package com.bachelorthesis.beekeeperMobile.IntentRecognizer
+package com.bachelorthesis.beekeeperMobile.intentRecognizer
 
 /**
  * A data class to hold the structured output from the intent recognizer.

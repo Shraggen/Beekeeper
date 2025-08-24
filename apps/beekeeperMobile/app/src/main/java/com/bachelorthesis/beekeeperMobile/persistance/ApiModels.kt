@@ -1,4 +1,4 @@
-package com.bachelorthesis.beekeeperMobile.models
+package com.bachelorthesis.beekeeperMobile.persistance
 
 import com.google.gson.annotations.SerializedName
 

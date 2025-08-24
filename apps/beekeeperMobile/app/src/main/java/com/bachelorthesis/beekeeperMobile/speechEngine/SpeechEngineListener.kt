@@ -1,4 +1,4 @@
-package com.bachelorthesis.beekeeperMobile
+package com.bachelorthesis.beekeeperMobile.speechEngine
 
 interface SpeechEngineListener {
     /**

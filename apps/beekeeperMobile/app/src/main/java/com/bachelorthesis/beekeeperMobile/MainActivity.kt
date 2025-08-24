@@ -1,90 +1,246 @@
 package com.bachelorthesis.beekeeperMobile
 
 import android.Manifest
+import android.app.DownloadManager
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.util.Log
+import android.view.Menu
+import android.view.MenuItem
+import android.view.View
 import android.widget.Button
+import android.widget.ProgressBar
+import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.bachelorthesis.beekeeperMobile.assetManager.AssetManager
+import com.bachelorthesis.beekeeperMobile.assetManager.DownloadRequestInfo
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
+/**
+ * The main entry point of the application.
+ *
+ * This activity orchestrates the setup process:
+ * 1.  Permissions: Verifies that necessary permissions are granted.
+ * 2.  AI Models: Uses the AssetManager to check for, download, and prepare the models.
+ *
+ * NOTE: An explicit check for OS-level language packs was removed, as it proved to be
+ * unreliable on some devices. We now rely on the SpeechEngine's own error handling to
+ * manage speech recognition availability.
+ */
 class MainActivity : AppCompatActivity() {
-    // REFACTOR: Use a single request code for all permissions for simplicity.
+
     private val PERMISSIONS_REQUEST_CODE = 101
+    private val activityScope = CoroutineScope(Dispatchers.Main)
+
+    // UI Elements
+    private lateinit var statusTextView: TextView
+    private lateinit var downloadProgressBar: ProgressBar
+    private lateinit var startButton: Button
+    private lateinit var stopButton: Button
+
+    // Core Logic Components
+    private lateinit var assetManager: AssetManager
+    private var voskDownloadId: Long = -1L
+    private val pendingDownloadIds = mutableSetOf<Long>()
+
+    private enum class AppState {
+        INITIALIZING, DOWNLOADING, READY_TO_START, SERVICE_RUNNING
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        val startButton: Button = findViewById(R.id.buttonStartService)
-        val stopButton: Button = findViewById(R.id.buttonStopService)
+        statusTextView = findViewById(R.id.statusTextView)
+        downloadProgressBar = findViewById(R.id.downloadProgressBar)
+        startButton = findViewById(R.id.buttonStartService)
+        stopButton = findViewById(R.id.buttonStopService)
 
-        startButton.setOnClickListener {
-            // REFACTOR: The check function now handles all required permissions.
-            checkAndRequestPermissions()
-        }
+        assetManager = AssetManager(this)
+        registerReceiver(downloadReceiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), RECEIVER_EXPORTED)
 
-        stopButton.setOnClickListener {
-            stopBeekeeperService()
+        startButton.setOnClickListener { startBeekeeperService() }
+        stopButton.setOnClickListener { stopBeekeeperService() }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        initiateSetup()
+    }
+
+    /**
+     * SIMPLIFIED: The setup flow is now just Permissions -> AI Models.
+     */
+    private fun initiateSetup() {
+        updateUiForState(AppState.INITIALIZING, "Checking permissions...")
+        if (!hasAllPermissions()) {
+            requestPermissions()
+        } else {
+            checkAssets()
         }
     }
 
-    private fun checkAndRequestPermissions() {
-        // REFACTOR: Create a list of permissions your app needs.
-        val requiredPermissions = mutableListOf<String>()
-        requiredPermissions.add(Manifest.permission.RECORD_AUDIO)
-
-        // REFACTOR: Conditionally add the notification permission ONLY for Android 13 (TIRAMISU) and up.
-        requiredPermissions.add(Manifest.permission.POST_NOTIFICATIONS)
-
-        val permissionsToRequest = requiredPermissions.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+    //region Permission Handling
+    private fun hasAllPermissions(): Boolean {
+        return REQUIRED_PERMISSIONS.all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
         }
+    }
 
-        if (permissionsToRequest.isEmpty()) {
-            // All permissions are already granted, start the service.
-            startBeekeeperService()
-        } else {
-            // Request the permissions that have not been granted yet.
-            ActivityCompat.requestPermissions(
-                this,
-                permissionsToRequest.toTypedArray(),
-                PERMISSIONS_REQUEST_CODE
-            )
-        }
+    private fun requestPermissions() {
+        ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, PERMISSIONS_REQUEST_CODE)
     }
 
     override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == PERMISSIONS_REQUEST_CODE) {
-            // REFACTOR: Check if ALL requested permissions were granted.
-            val allPermissionsGranted = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+        if (requestCode == PERMISSIONS_REQUEST_CODE && !hasAllPermissions()) {
+            Toast.makeText(this, "Permissions were denied. The app cannot function.", Toast.LENGTH_LONG).show()
+        }
+        // onResume will re-trigger the setup flow.
+    }
+    //endregion
 
-            if (allPermissionsGranted) {
-                Toast.makeText(this, "All permissions granted!", Toast.LENGTH_SHORT).show()
-                startBeekeeperService()
-            } else {
-                Toast.makeText(this, "Audio and/or Notification permissions were denied.", Toast.LENGTH_LONG).show()
+    // REMOVED: The language pack handling region has been deleted.
+
+    //region Asset Management
+    private fun checkAssets() {
+        updateUiForState(AppState.INITIALIZING, "Checking for AI models...")
+        if (assetManager.checkPrerequisites()) {
+            Log.i(TAG, "All models are ready.")
+            updateUiForState(AppState.READY_TO_START)
+        } else {
+            Log.w(TAG, "Models not found. Starting download.")
+            updateUiForState(AppState.DOWNLOADING)
+            val downloads: DownloadRequestInfo = assetManager.queueModelDownloads()
+            voskDownloadId = downloads.voskDownloadId
+            pendingDownloadIds.addAll(downloads.allIds)
+        }
+    }
+
+    private val downloadReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
+            if (id in pendingDownloadIds) {
+                pendingDownloadIds.remove(id)
+                activityScope.launch {
+                    if (id == voskDownloadId) {
+                        assetManager.unzipVoskModel()
+                    }
+                    if (pendingDownloadIds.isEmpty()) {
+                        if (assetManager.checkPrerequisites()) {
+                            Log.i(TAG, "All models successfully downloaded and prepared.")
+                            updateUiForState(AppState.READY_TO_START)
+                        } else {
+                            Log.e(TAG, "Download finished, but prerequisites check failed.")
+                            updateUiForState(AppState.INITIALIZING, "Error during setup. Please use the menu to clear models and try again.")
+                        }
+                    }
+                }
+            }
+        }
+    }
+    //endregion
+
+    //region Menu and Cleanup
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.main_menu, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.action_clear_models -> {
+                showCleanupConfirmationDialog()
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
+        }
+    }
+
+    private fun showCleanupConfirmationDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Clear All Downloaded Models?")
+            .setMessage("This will delete the AI models from your device. They will be re-downloaded the next time you open the app.")
+            .setPositiveButton("Confirm") { _, _ ->
+                activityScope.launch {
+                    val success = assetManager.cleanup()
+                    if (success) {
+                        Toast.makeText(this@MainActivity, "Models cleared successfully.", Toast.LENGTH_SHORT).show()
+                        initiateSetup()
+                    } else {
+                        Toast.makeText(this@MainActivity, "Failed to clear models.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+    //endregion
+
+    //region UI and Service Control
+    private fun updateUiForState(state: AppState, message: String? = null) {
+        when (state) {
+            AppState.INITIALIZING -> {
+                statusTextView.text = message ?: "Initializing..."
+                startButton.isEnabled = false
+                downloadProgressBar.visibility = View.VISIBLE
+                downloadProgressBar.isIndeterminate = true
+            }
+            AppState.DOWNLOADING -> {
+                statusTextView.text = "Downloading required models..."
+                startButton.isEnabled = false
+                downloadProgressBar.visibility = View.VISIBLE
+                downloadProgressBar.isIndeterminate = true
+            }
+            AppState.READY_TO_START -> {
+                statusTextView.text = "Ready to start listening session."
+                startButton.isEnabled = true
+                downloadProgressBar.visibility = View.GONE
+            }
+            AppState.SERVICE_RUNNING -> {
+                statusTextView.text = "Service is running..."
+                startButton.isEnabled = false
+                stopButton.isEnabled = true
             }
         }
     }
 
     private fun startBeekeeperService() {
         val serviceIntent = Intent(this, BeekeeperService::class.java)
-        // Correctly using startForegroundService for modern Android.
         ContextCompat.startForegroundService(this, serviceIntent)
         Toast.makeText(this, "Beekeeper service started", Toast.LENGTH_SHORT).show()
+        updateUiForState(AppState.SERVICE_RUNNING)
     }
 
     private fun stopBeekeeperService() {
         val serviceIntent = Intent(this, BeekeeperService::class.java)
         stopService(serviceIntent)
         Toast.makeText(this, "Beekeeper service stopped", Toast.LENGTH_SHORT).show()
+        updateUiForState(AppState.READY_TO_START)
+    }
+    //endregion
+
+    override fun onDestroy() {
+        super.onDestroy()
+        unregisterReceiver(downloadReceiver)
+        activityScope.cancel()
+    }
+
+    companion object {
+        private const val TAG = "MainActivity"
+        private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
     }
 }

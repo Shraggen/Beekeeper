@@ -1,3 +1,4 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Properties
 import java.io.FileInputStream
 
@@ -55,14 +56,31 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+
+            buildConfigField("String", "VOSK_MODEL_URL", "\"https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip\"")
+            buildConfigField("String", "VOSK_ZIP_FILENAME", "\"vosk-model-small-en-us-0.15.zip\"")
+
+            buildConfigField("String", "LLM_MODEL_URL", "\"https://github.com/Shraggen/Beekeeper/releases/download/v1.0.0/gemma3-270m-it-q8.task\"")
+            buildConfigField("String", "LLM_MODEL_FILENAME", "\"gemma3-270m-it-q8.task\"")
+        }
+        debug {
+            buildConfigField("String", "VOSK_MODEL_URL", "\"https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip\"")
+            buildConfigField("String", "VOSK_ZIP_FILENAME", "\"vosk-model-small-en-us-0.15.zip\"")
+
+            buildConfigField("String", "LLM_MODEL_URL", "\"https://github.com/Shraggen/Beekeeper/releases/download/v1.0.0/gemma3-270m-it-q8.task\"")
+            buildConfigField("String", "LLM_MODEL_FILENAME", "\"gemma3-270m-it-q8.task\"")
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    kotlinOptions {
-        jvmTarget = "11"
+
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_11)
+        }
     }
 }
 
@@ -82,19 +100,17 @@ dependencies {
     // START OF FIX: Use explicit AAR dependencies for Vosk and JNA   //
     // This matches your working project and prevents build errors.   //
     //================================================================//
-    implementation("com.alphacephei:vosk-android:0.3.47@aar")
-    implementation("net.java.dev.jna:jna:5.14.0@aar")
+    implementation(libs.vosk.android)
+    implementation(libs.jna)
     //================================================================//
     // END OF FIX                                                     //
     //================================================================//
-
-    // Local project module
-    implementation(project(":models"))
 
     // Networking libraries (aligned with versions from your working project)
     implementation(libs.retrofit)
     implementation(libs.converter.gson)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.cronet.embedded)
 
     // Test dependencies
     testImplementation(libs.junit)
@@ -106,5 +122,5 @@ dependencies {
     debugImplementation(libs.androidx.ui.test.manifest)
 
     //LLM
-    implementation("com.google.mediapipe:tasks-genai:0.10.25")
+    implementation(libs.tasks.genai)
 }

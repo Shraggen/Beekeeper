@@ -1,4 +1,4 @@
-package com.bachelorthesis.beekeeperMobile.IntentRecognizer
+package com.bachelorthesis.beekeeperMobile.intentRecognizer
 
 import android.content.Context
 import android.util.Log
