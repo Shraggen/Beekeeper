@@ -238,18 +238,22 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
         override fun onDone(utteranceId: String?) {
             serviceScope.launch(Dispatchers.Main) {
                 when {
-                    // If we're waiting for an answer, start listening immediately.
                     currentState == ServiceState.AWAITING_ANSWER -> {
                         AndroidLog.d(TAG, "TTS finished prompting for answer, now listening for user's response.")
                         speechEngine?.startListeningForCommand()
                     }
-                    // These are the original utteranceId-based checks for single-turn commands.
+                    // MODIFIED: Now we explicitly tell the engine to listen for the hotword
+                    // after the final response has been spoken.
+                    utteranceId == UTTERANCE_ID_COMMAND_RESPONSE -> {
+                        transitionToState(ServiceState.IDLE)
+                        speechEngine?.startListeningForHotword() // RE-ENGAGE HOTWORD LISTENING
+                    }
+                    // Legacy single-turn logic
                     utteranceId == UTTERANCE_ID_PROMPT_FOR_COMMAND -> speechEngine?.startListeningForCommand()
                     utteranceId == UTTERANCE_ID_PROMPT_FOR_NOTE -> {
                         transitionToState(ServiceState.AWAITING_NOTE)
                         speechEngine?.startListeningForCommand()
                     }
-                    utteranceId == UTTERANCE_ID_COMMAND_RESPONSE -> transitionToState(ServiceState.IDLE)
                 }
             }
         }

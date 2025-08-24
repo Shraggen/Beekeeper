@@ -150,9 +150,11 @@ class SpeechEngine(
     // --- AndroidRecognitionListener Implementation ---
     override fun onResults(results: Bundle?) {
         val spokenText = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.getOrNull(0)
-        startListeningForHotword() // Always go back to hotword listening
         if (!spokenText.isNullOrBlank()) {
             listener.onCommandTranscribed(spokenText)
+        } else {
+            // If there's no result, we should go back to listening.
+            startListeningForHotword()
         }
     }
 
