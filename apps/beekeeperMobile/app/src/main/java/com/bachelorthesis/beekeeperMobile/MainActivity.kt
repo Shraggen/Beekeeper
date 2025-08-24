@@ -9,8 +9,6 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
-import android.view.Menu
-import android.view.MenuItem
 import android.view.View
 import android.widget.Button
 import android.widget.ProgressBar
@@ -48,6 +46,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var downloadProgressBar: ProgressBar
     private lateinit var startButton: Button
     private lateinit var stopButton: Button
+    private lateinit var clearModelsButton: Button // NEW: Declare the new button
 
     // Core Logic Components
     private lateinit var assetManager: AssetManager
@@ -66,12 +65,15 @@ class MainActivity : AppCompatActivity() {
         downloadProgressBar = findViewById(R.id.downloadProgressBar)
         startButton = findViewById(R.id.buttonStartService)
         stopButton = findViewById(R.id.buttonStopService)
+        clearModelsButton = findViewById(R.id.buttonClearModels) // NEW: Initialize the new button
 
         assetManager = AssetManager(this)
         registerReceiver(downloadReceiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), RECEIVER_EXPORTED)
 
         startButton.setOnClickListener { startBeekeeperService() }
         stopButton.setOnClickListener { stopBeekeeperService() }
+        // NEW: Set click listener for the clear models button
+        clearModelsButton.setOnClickListener { showCleanupConfirmationDialog() }
     }
 
     override fun onResume() {
@@ -113,7 +115,6 @@ class MainActivity : AppCompatActivity() {
     }
     //endregion
 
-    // REMOVED: The language pack handling region has been deleted.
 
     //region Asset Management
     private fun checkAssets() {
@@ -154,21 +155,7 @@ class MainActivity : AppCompatActivity() {
     }
     //endregion
 
-    //region Menu and Cleanup
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menuInflater.inflate(R.menu.main_menu, menu)
-        return true
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        return when (item.itemId) {
-            R.id.action_clear_models -> {
-                showCleanupConfirmationDialog()
-                true
-            }
-            else -> super.onOptionsItemSelected(item)
-        }
-    }
+    //region Menu and Cleanup (Menu part is REMOVED, cleanup dialog is kept)
 
     private fun showCleanupConfirmationDialog() {
         AlertDialog.Builder(this)
@@ -179,7 +166,7 @@ class MainActivity : AppCompatActivity() {
                     val success = assetManager.cleanup()
                     if (success) {
                         Toast.makeText(this@MainActivity, "Models cleared successfully.", Toast.LENGTH_SHORT).show()
-                        initiateSetup()
+                        initiateSetup() // Re-initiate setup after cleanup
                     } else {
                         Toast.makeText(this@MainActivity, "Failed to clear models.", Toast.LENGTH_SHORT).show()
                     }
@@ -196,24 +183,31 @@ class MainActivity : AppCompatActivity() {
             AppState.INITIALIZING -> {
                 statusTextView.text = message ?: "Initializing..."
                 startButton.isEnabled = false
+                stopButton.isEnabled = false
+                clearModelsButton.isEnabled = false // NEW: Disable during initialization
                 downloadProgressBar.visibility = View.VISIBLE
                 downloadProgressBar.isIndeterminate = true
             }
             AppState.DOWNLOADING -> {
                 statusTextView.text = "Downloading required models..."
                 startButton.isEnabled = false
+                stopButton.isEnabled = false
+                clearModelsButton.isEnabled = false // NEW: Disable during download
                 downloadProgressBar.visibility = View.VISIBLE
                 downloadProgressBar.isIndeterminate = true
             }
             AppState.READY_TO_START -> {
                 statusTextView.text = "Ready to start listening session."
                 startButton.isEnabled = true
+                stopButton.isEnabled = false
+                clearModelsButton.isEnabled = true // NEW: Enable when ready
                 downloadProgressBar.visibility = View.GONE
             }
             AppState.SERVICE_RUNNING -> {
                 statusTextView.text = "Service is running..."
                 startButton.isEnabled = false
                 stopButton.isEnabled = true
+                clearModelsButton.isEnabled = true // NEW: Enable even when service is running
             }
         }
     }

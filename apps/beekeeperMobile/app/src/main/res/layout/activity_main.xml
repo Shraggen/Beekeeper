@@ -37,4 +37,13 @@
         android:layout_marginTop="16dp"
         android:text="@string/stop_listening_session" />
 
+    <!-- NEW BUTTON FOR CLEARING MODELS -->
+    <Button
+        android:id="@+id/buttonClearModels"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="@string/clear_downloaded_models"
+        android:enabled="false" /> <!-- Initially disabled -->
+
 </LinearLayout>
