@@ -58,35 +58,33 @@ class LLMIntentRecognizer : IntentRecognizer {
         }
     }
 
-    // RENAMED & MODIFIED: The prompt now includes Serbian examples.
     private fun buildMultilingualPromptFor(text: String): String {
         return """
-        You are a highly intelligent JSON formatting API. Your ONLY job is to analyze the user's text and convert it into a specific JSON format. You must handle both English and Serbian input.
+        You are a highly intelligent JSON formatting and conversational response API for a beekeeping app. Your job is to analyze the user's text, convert it into a specific JSON format, and generate a natural language response for a text-to-speech engine.
 
         **Instructions:**
-        - The possible intents are: 'create_log', 'read_last_log', 'read_last_task'.
-        - You must extract 'hive_id' (a number) and 'content' (the note).
-        - Your entire response must be ONLY the JSON object, with no other text or formatting.
+        - The possible intents are: 'create_log', 'read_last_log', 'read_last_task', and 'unknown'.
+        - You must extract 'hive_id' (a number) and 'content' (the note) as entities.
+        - You MUST generate a 'responseText' field containing a user-facing, natural language sentence. This response should be in the same language as the user's input.
+        - Your entire output must be ONLY the JSON object, with no other text or formatting.
 
         **English Examples:**
         1. User Text: "create a note for beehive 10 that says the queen is healthy"
-           Your JSON Response: {"intent":"create_log","entities":{"hive_id":"10","content":"the queen is healthy"}}
+           Your JSON Response: {"intent":"create_log","entities":{"hive_id":"10","content":"the queen is healthy"},"responseText":"Note saved for beehive 10."}
         2. User Text: "read last note for hive 5"
-           Your JSON Response: {"intent":"read_last_log","entities":{"hive_id":"5"}}
-        3. User Text: "what's the last task for beehive 12"
-           Your JSON Response: {"intent":"read_last_task","entities":{"hive_id":"12"}}
+           Your JSON Response: {"intent":"read_last_log","entities":{"hive_id":"5"},"responseText":"Fetching the last note for beehive 5."}
+        3. User Text: "note for beehive 7"
+           Your JSON Response: {"intent":"create_log","entities":{"hive_id":"7"},"responseText":"Okay, what is the note for beehive 7?"}
 
         **Serbian (Srpski) Examples:**
         1. User Text: "beleška za košnicu 7 matica je viđena i zdrava"
-           Your JSON Response: {"intent":"create_log","entities":{"hive_id":"7","content":"matica je viđena i zdrava"}}
+           Your JSON Response: {"intent":"create_log","entities":{"hive_id":"7","content":"matica je viđena i zdrava"},"responseText":"Beleška sačuvana za košnicu 7."}
         2. User Text: "pročitaj poslednju belešku za košnicu 3"
-           Your JSON Response: {"intent":"read_last_log","entities":{"hive_id":"3"}}
-        3. User Text: "koji je zadnji zadatak za košnicu 21"
-           Your JSON Response: {"intent":"read_last_task","entities":{"hive_id":"21"}}
+           Your JSON Response: {"intent":"read_last_log","entities":{"hive_id":"3"},"responseText":"Preuzimam poslednju belešku za košnicu 3."}
 
         **Unknown Example:**
         1. User Text: "what's the weather like"
-           Your JSON Response: {"intent":"unknown","entities":{}}
+           Your JSON Response: {"intent":"unknown","entities":{},"responseText":"Sorry, I can't help with that. You can ask me to create a log or read the last log or task."}
 
         **User Text to Process:**
         "$text"
@@ -95,7 +93,7 @@ class LLMIntentRecognizer : IntentRecognizer {
         """.trimIndent()
     }
 
-
+    // MODIFIED: Parse the new responseText field
     private fun parseLlmResponse(response: String?): StructuredIntent {
         if (response.isNullOrBlank()) {
             Log.w("LLMIntentRecognizer", "LLM returned a null or empty response.")
@@ -115,6 +113,7 @@ class LLMIntentRecognizer : IntentRecognizer {
         return try {
             val jsonObject = JSONObject(jsonString)
             val intent = jsonObject.optString("intent", "unknown")
+            val responseText = jsonObject.optString("responseText", null) // Extract the new field
             val entitiesJson = jsonObject.optJSONObject("entities")
             val entities = mutableMapOf<String, String>()
 
@@ -125,7 +124,7 @@ class LLMIntentRecognizer : IntentRecognizer {
                 entities["content"] = jsonObject.getString("content")
             }
 
-            StructuredIntent(intent, entities)
+            StructuredIntent(intent, entities, responseText) // Pass responseText to constructor
         } catch (e: Exception) {
             Log.e("LLMIntentRecognizer", "Failed to parse extracted JSON string: $jsonString", e)
             StructuredIntent.UNKNOWN
