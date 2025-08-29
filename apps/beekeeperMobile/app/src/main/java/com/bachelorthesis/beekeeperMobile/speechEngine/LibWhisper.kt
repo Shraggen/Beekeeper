@@ -1,0 +1,29 @@
+package com.bachelorthesis.beekeeperMobile.speechEngine
+
+object LibWhisper {
+    init {
+        // This should match the library name in CMakeLists.txt
+        System.loadLibrary("beekeeper_whisper")
+    }
+
+    /**
+     * Initializes a whisper_context from a model file.
+     * @param modelPath The path to the ggml model file.
+     * @return A pointer to the whisper_context, or 0 if failed.
+     */
+    external fun initContext(modelPath: String): Long
+
+    /**
+     * Releases the whisper_context.
+     * @param contextPtr The pointer to the whisper_context.
+     */
+    external fun releaseContext(contextPtr: Long)
+
+    /**
+     * Transcribes an audio buffer.
+     * @param contextPtr Pointer to the whisper_context.
+     * @param audioData The audio data in 32-bit PCM format.
+     * @return The transcribed text.
+     */
+    external fun transcribe(contextPtr: Long, audioData: FloatArray): String
+}

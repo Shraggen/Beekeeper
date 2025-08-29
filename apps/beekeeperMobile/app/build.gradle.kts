@@ -35,18 +35,25 @@ android {
 
     defaultConfig {
         applicationId = "com.bachelorthesis.beekeeperMobile"
-        minSdk = 34
+        minSdk = 33
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+		
+		externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++17" // Use C++17 standard
+            }
+        }
 
         ndk {
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86_64", "x86"))
         }
 
         ndkVersion = "25.2.9519653"
+        signingConfig = signingConfigs.getByName("debug")
 
     }
 
@@ -61,15 +68,35 @@ android {
             buildConfigField("String", "VOSK_MODEL_URL", "\"https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip\"")
             buildConfigField("String", "VOSK_ZIP_FILENAME", "\"vosk-model-small-en-us-0.15.zip\"")
 
-            buildConfigField("String", "LLM_MODEL_URL", "\"https://github.com/Shraggen/Beekeeper/releases/download/v1.0.0/gemma3-270m-it-q8.task\"")
+            buildConfigField("String", "LLM_MODEL_URL", "\"https://huggingface.co/litert-community/gemma-3-270m-it/resolve/main/gemma3-270m-it-q8.task\"")
             buildConfigField("String", "LLM_MODEL_FILENAME", "\"gemma3-270m-it-q8.task\"")
+
+            buildConfigField("String", "WHISPER_MODEL_URL", "\"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin\"")
+            buildConfigField("String", "WHISPER_MODEL_FILENAME", "\"ggml-base.en.bin\"")
+			
+			externalNativeBuild {
+                cmake {
+                    // This enables high-performance builds
+                    cFlags += "-O3"
+                    cppFlags += "-O3"
+                }
+            }
         }
         debug {
             buildConfigField("String", "VOSK_MODEL_URL", "\"https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip\"")
             buildConfigField("String", "VOSK_ZIP_FILENAME", "\"vosk-model-small-en-us-0.15.zip\"")
 
-            buildConfigField("String", "LLM_MODEL_URL", "\"https://github.com/Shraggen/Beekeeper/releases/download/v1.0.0/gemma3-270m-it-q8.task\"")
+            buildConfigField("String", "LLM_MODEL_URL", "\"https://huggingface.co/litert-community/gemma-3-270m-it/resolve/main/gemma3-270m-it-q8.task\"")
             buildConfigField("String", "LLM_MODEL_FILENAME", "\"gemma3-270m-it-q8.task\"")
+
+            buildConfigField("String", "WHISPER_MODEL_URL", "\"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin\"")
+            buildConfigField("String", "WHISPER_MODEL_FILENAME", "\"ggml-base.en.bin\"")
+        }
+    }
+	
+	externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
         }
     }
 
@@ -130,6 +157,9 @@ dependencies {
 
     //LLM
     implementation(libs.tasks.genai)
+    implementation("com.google.mediapipe:tasks-vision:latest.release")
+    implementation("com.google.mediapipe:tasks-text:latest.release")
+    implementation("com.google.mediapipe:tasks-audio:latest.release")
 
     implementation(libs.androidx.preference.ktx)
 }
