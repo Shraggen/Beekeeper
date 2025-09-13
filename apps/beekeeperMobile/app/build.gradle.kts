@@ -49,7 +49,7 @@ android {
         }
 
         ndk {
-            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86_64", "x86"))
+            abiFilters.addAll(listOf("arm64-v8a"))
         }
 
         ndkVersion = "25.2.9519653"
@@ -71,8 +71,8 @@ android {
             buildConfigField("String", "LLM_MODEL_URL", "\"https://huggingface.co/litert-community/gemma-3-270m-it/resolve/main/gemma3-270m-it-q8.task\"")
             buildConfigField("String", "LLM_MODEL_FILENAME", "\"gemma3-270m-it-q8.task\"")
 
-            buildConfigField("String", "WHISPER_MODEL_URL", "\"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin\"")
-            buildConfigField("String", "WHISPER_MODEL_FILENAME", "\"ggml-base.en.bin\"")
+            buildConfigField("String", "WHISPER_MODEL_URL", "\"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q8_0.bin\"")
+            buildConfigField("String", "WHISPER_MODEL_FILENAME", "\"ggml-base-q8_0.bin\"")
 			
 			externalNativeBuild {
                 cmake {

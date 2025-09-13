@@ -4,11 +4,11 @@
 #include <string>
 #include <vector>
 #include <android/log.h>
-#include "whisper.cpp/include/whisper.h"
+#include "whisper.cpp/include/whisper.h" // Assumes whisper.cpp is a subdirectory
 
 #define TAG "JNIBridge"
 
-// Helper function to convert Java String to C++ string
+// Helper function to convert Java String to C++ string (no changes here)
 std::string jstring_to_string(JNIEnv *env, jstring jstr) {
     if (!jstr) return "";
     const jclass stringClass = env->GetObjectClass(jstr);
@@ -23,6 +23,7 @@ std::string jstring_to_string(JNIEnv *env, jstring jstr) {
     return ret;
 }
 
+// initContext and releaseContext remain the same
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_bachelorthesis_beekeeperMobile_speechEngine_LibWhisper_initContext(
         JNIEnv *env,
@@ -48,11 +49,16 @@ Java_com_bachelorthesis_beekeeperMobile_speechEngine_LibWhisper_releaseContext(
     whisper_free(context);
 }
 
+
+// =======================================================================================
+// OPTIMIZED TRANSCRIBE FUNCTION
+// =======================================================================================
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_bachelorthesis_beekeeperMobile_speechEngine_LibWhisper_transcribe(
         JNIEnv *env,
         jobject /* this */,
         jlong context_ptr,
+        jint n_threads, // OPTIMIZATION 1: Accept thread count
         jfloatArray audio_data) {
 
     auto *context = (struct whisper_context *) context_ptr;
@@ -61,7 +67,17 @@ Java_com_bachelorthesis_beekeeperMobile_speechEngine_LibWhisper_transcribe(
         return env->NewStringUTF("");
     }
 
-    jfloat *audio_arr = env->GetFloatArrayElements(audio_data, nullptr);
+    // OPTIMIZATION 2: Use GetPrimitiveArrayCritical for potentially zero-copy access
+    jboolean is_copy = JNI_FALSE;
+    jfloat *audio_arr = (jfloat *)env->GetPrimitiveArrayCritical(audio_data, &is_copy);
+    if (audio_arr == nullptr) {
+        __android_log_print(ANDROID_LOG_ERROR, TAG, "Failed to get audio data from JNI.");
+        return env->NewStringUTF("");
+    }
+    if (is_copy == JNI_TRUE) {
+        __android_log_print(ANDROID_LOG_WARN, TAG, "JNI audio array was copied.");
+    }
+
     const jsize audio_len = env->GetArrayLength(audio_data);
 
     // Use default whisper parameters
@@ -70,18 +86,24 @@ Java_com_bachelorthesis_beekeeperMobile_speechEngine_LibWhisper_transcribe(
     params.print_special = false;
     params.print_realtime = false;
     params.print_timestamps = false;
-    params.language = "auto"; // Hardcode to Serbian as per ADR-010, can be parameterized later
+    params.language = "sr";
+
+    // --- OPTIMIZATION 1: Set the number of threads for processing ---
+    params.n_threads = n_threads;
+    // ---
 
     // Run transcription
     if (whisper_full(context, params, audio_arr, audio_len) != 0) {
         __android_log_print(ANDROID_LOG_ERROR, TAG, "Failed to process audio.");
-        env->ReleaseFloatArrayElements(audio_data, audio_arr, JNI_ABORT);
+        // OPTIMIZATION 2: Make sure to release the critical array
+        env->ReleasePrimitiveArrayCritical(audio_data, audio_arr, JNI_ABORT);
         return env->NewStringUTF("");
     }
 
-    env->ReleaseFloatArrayElements(audio_data, audio_arr, JNI_ABORT);
+    // OPTIMIZATION 2: Release the critical array
+    env->ReleasePrimitiveArrayCritical(audio_data, audio_arr, 0);
 
-    // Concatenate results
+    // Concatenate results (no changes here)
     std::string result_text;
     const int n_segments = whisper_full_n_segments(context);
     for (int i = 0; i < n_segments; ++i) {

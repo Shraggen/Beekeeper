@@ -20,10 +20,11 @@ object LibWhisper {
     external fun releaseContext(contextPtr: Long)
 
     /**
-     * Transcribes an audio buffer.
+     * Transcribes an audio buffer using a specified number of threads.
      * @param contextPtr Pointer to the whisper_context.
+     * @param nThreads The number of threads to use for computation.
      * @param audioData The audio data in 32-bit PCM format.
      * @return The transcribed text.
      */
-    external fun transcribe(contextPtr: Long, audioData: FloatArray): String
+    external fun transcribe(contextPtr: Long, nThreads: Int, audioData: FloatArray): String
 }

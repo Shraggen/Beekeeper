@@ -28,6 +28,8 @@ class WhisperTranscriber(
     private var audioRecord: AudioRecord? = null
     private var bufferSizeInBytes: Int = 0
 
+    private val nThreads = Runtime.getRuntime().availableProcessors().coerceAtMost(8)
+
     companion object {
         private const val TAG = "WhisperTranscriber"
         private const val SAMPLE_RATE = 16000 // Whisper requires 16kHz
@@ -64,7 +66,7 @@ class WhisperTranscriber(
                 val readSize = audioRecord?.read(audioBuffer, 0, audioBuffer.size) ?: 0
                 if (readSize > 0) {
                     val floatArray = convertShortArrayToFloatArray(audioBuffer, readSize)
-                    val result = LibWhisper.transcribe(whisperContextPtr, floatArray)
+                    val result = LibWhisper.transcribe(whisperContextPtr, nThreads, floatArray)
                     if (result.isNotBlank()) {
                         withContext(Dispatchers.Main) {
                             listener(result)
