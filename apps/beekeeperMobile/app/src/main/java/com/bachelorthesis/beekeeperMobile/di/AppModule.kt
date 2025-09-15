@@ -10,6 +10,8 @@ import com.bachelorthesis.beekeeperMobile.persistance.AppDatabase
 import com.bachelorthesis.beekeeperMobile.persistance.LogDao
 import com.bachelorthesis.beekeeperMobile.persistance.LogRepository
 import com.bachelorthesis.beekeeperMobile.persistance.RetrofitClient
+import com.bachelorthesis.beekeeperMobile.speechEngine.SpeechEngine
+import com.bachelorthesis.beekeeperMobile.speechEngine.SpeechEngineInterface
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -68,5 +70,18 @@ object AppModule {
         }
 
         return recognizer
+    }
+
+    // [FIX] Tell Hilt how to provide an SpeechEngineInterface.
+    // We can use @Binds for this, which is more efficient than @Provides
+    // when the implementation has an @Inject constructor.
+    // However, for clarity and consistency, we will use @Provides for now.
+    @Provides
+    @Singleton
+    fun provideSpeechEngine(
+        @ApplicationContext context: Context,
+        assetManager: AssetManager
+    ): SpeechEngineInterface {
+        return SpeechEngine(context, assetManager)
     }
 }

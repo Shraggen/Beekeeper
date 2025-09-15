@@ -163,6 +163,7 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.preference.ktx)
     implementation(libs.androidx.runtime)
+    implementation(libs.androidx.runner)
     ksp(libs.room.compiler)
 
     // Test dependencies
@@ -190,6 +191,17 @@ dependencies {
     // Hilt support for WorkManager
     implementation(libs.androidx.hilt.work)
     ksp(libs.androidx.hilt.compiler)
+
+    // For Robolectric tests.
+    testImplementation(libs.hilt.android.testing)
+    // ...with Java.
+    testAnnotationProcessor(libs.hilt.android.compiler)
+
+
+    // For instrumented tests.
+    androidTestImplementation(libs.hilt.android.testing)
+    // ...with Java.
+    androidTestAnnotationProcessor(libs.hilt.android.compiler)
 
     // Dependencies for unit tests
     testImplementation(libs.junit)

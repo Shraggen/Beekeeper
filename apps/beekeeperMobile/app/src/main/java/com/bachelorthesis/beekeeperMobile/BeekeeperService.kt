@@ -22,6 +22,7 @@ import com.bachelorthesis.beekeeperMobile.intentRecognizer.IntentRecognizer
 import com.bachelorthesis.beekeeperMobile.intentRecognizer.StructuredIntent
 import com.bachelorthesis.beekeeperMobile.persistance.LogRepository // NEW
 import com.bachelorthesis.beekeeperMobile.speechEngine.SpeechEngine
+import com.bachelorthesis.beekeeperMobile.speechEngine.SpeechEngineInterface
 import com.bachelorthesis.beekeeperMobile.speechEngine.SpeechEngineListener
 import com.bachelorthesis.beekeeperMobile.sync.SyncWorker
 import dagger.hilt.android.AndroidEntryPoint
@@ -39,7 +40,8 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    private var speechEngine: SpeechEngine? = null
+    @Inject
+    lateinit var speechEngine: SpeechEngineInterface
     private var textToSpeech: TextToSpeech? = null
 
     // --- INJECTED DEPENDENCIES ---
@@ -94,25 +96,19 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
 
             // SpeechEngine is also tied to the service lifecycle (needs a listener).
             // We create it here but pass it its dependencies (which we got from DI).
-            initializeSpeechEngine()
+            speechEngine.initialize(this@BeekeeperService) { success ->
+                if (success) {
+                    AndroidLog.d(TAG, "Speech Engine Initialized successfully.")
+                    isSpeechEngineReady = true
+                    checkInitializationComplete()
+                } else {
+                    handleError("Speech Engine could not start", true)
+                }
+            }
 
             scheduleLogSyncWorker()
         }
 
-    }
-
-    private fun initializeSpeechEngine() {
-        // We create it here, but its dependencies are clean.
-        speechEngine = SpeechEngine(this, this, assetManager) // Pass the injected AssetManager
-        speechEngine?.initialize { success ->
-            if (success) {
-                AndroidLog.d(TAG, "Speech Engine Initialized successfully.")
-                isSpeechEngineReady = true
-                checkInitializationComplete()
-            } else {
-                handleError("Speech Engine could not start", true)
-            }
-        }
     }
 
     private fun initializeIntentRecognizer() {
