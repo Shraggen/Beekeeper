@@ -125,7 +125,7 @@ jobs:
 
       # We must run the build AFTER initializing CodeQL
       - name: Build Android App for CodeQL Analysis
-        run: ./gradlew assembleDebug
+        run: ./gradlew clean build --no-daemon --stacktrace
         working-directory: ./apps/beekeeperMobile
 
       - name: Perform CodeQL Analysis (SAST)
