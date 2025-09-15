@@ -73,6 +73,9 @@ android {
 
             buildConfigField("String", "WHISPER_MODEL_URL", "\"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q8_0.bin\"")
             buildConfigField("String", "WHISPER_MODEL_FILENAME", "\"ggml-base-q8_0.bin\"")
+
+            buildConfigField("String", "VAD_MODEL_URL", "\"https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin\"")
+            buildConfigField("String", "VAD_MODEL_FILENAME", "\"ggml-silero-v5.1.2.bin\"")
 			
 			externalNativeBuild {
                 cmake {
@@ -91,6 +94,9 @@ android {
 
             buildConfigField("String", "WHISPER_MODEL_URL", "\"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q8_0.bin\"")
             buildConfigField("String", "WHISPER_MODEL_FILENAME", "\"ggml-base-q8_0.bin\"")
+
+            buildConfigField("String", "VAD_MODEL_URL", "\"https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin\"")
+            buildConfigField("String", "VAD_MODEL_FILENAME", "\"ggml-silero-v5.1.2.bin\"")
 
             externalNativeBuild {
                 cmake {
@@ -168,8 +174,6 @@ dependencies {
     implementation("com.google.mediapipe:tasks-vision:latest.release")
     implementation("com.google.mediapipe:tasks-text:latest.release")
     implementation("com.google.mediapipe:tasks-audio:latest.release")
-
-    implementation("com.cloudflare.realtimekit.android-vad:silero:2.0.9")
 
     implementation(libs.androidx.preference.ktx)
 }

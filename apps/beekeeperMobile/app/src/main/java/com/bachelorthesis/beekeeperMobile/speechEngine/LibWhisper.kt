@@ -27,7 +27,7 @@ object LibWhisper {
      * @param language The language to use for transcription.
      * @return The transcribed text.
      */
-    external fun transcribe(contextPtr: Long, nThreads: Int, audioData: FloatArray, language: String = "auto"): String
+    external fun transcribe(contextPtr: Long, nThreads: Int, audioData: FloatArray, vadModelPath: String, language: String = "auto"): String
 
     /**
      * Returns a map of supported languages and their full names.

@@ -65,7 +65,6 @@ Java_com_bachelorthesis_beekeeperMobile_speechEngine_LibWhisper_getLanguages(
     return hashMap; // Return the created Java map
 }
 
-// initContext and releaseContext remain the same
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_bachelorthesis_beekeeperMobile_speechEngine_LibWhisper_initContext(
         JNIEnv *env,
@@ -73,7 +72,11 @@ Java_com_bachelorthesis_beekeeperMobile_speechEngine_LibWhisper_initContext(
         jstring model_path_j) {
     const std::string model_path = jstring_to_string(env, model_path_j);
     __android_log_print(ANDROID_LOG_INFO, TAG, "Initializing Whisper context with model: %s", model_path.c_str());
-    struct whisper_context *context = whisper_init_from_file_with_params(model_path.c_str(), whisper_context_default_params());
+
+    // Use default context parameters, VAD is not part of this.
+    struct whisper_context_params cparams = whisper_context_default_params();
+    struct whisper_context *context = whisper_init_from_file_with_params(model_path.c_str(), cparams);
+
     if (context == nullptr) {
         __android_log_print(ANDROID_LOG_ERROR, TAG, "Failed to initialize whisper context.");
         return 0;
@@ -99,6 +102,7 @@ Java_com_bachelorthesis_beekeeperMobile_speechEngine_LibWhisper_transcribe(
         jlong context_ptr,
         jint n_threads,
         jfloatArray audio_data,
+        jstring vad_model_path_j,
         jstring language) {
 
     auto *context = (struct whisper_context *) context_ptr;
@@ -125,6 +129,14 @@ Java_com_bachelorthesis_beekeeperMobile_speechEngine_LibWhisper_transcribe(
     params.print_timestamps = false;
     params.language = jstring_to_string(env, language).c_str();
     params.n_threads = n_threads;
+
+    //VAD
+    params.vad = true;
+    params.vad_model_path = jstring_to_string(env, vad_model_path_j).c_str();
+    params.vad_params.threshold                = 0.6f;
+    params.vad_params.min_silence_duration_ms  = 1000; // Increased silence duration
+    params.vad_params.max_speech_duration_s    = 30.0f;
+    params.vad_params.speech_pad_ms            = 200;
 
     if (whisper_full(context, params, audio_arr, audio_len) != 0) {
         __android_log_print(ANDROID_LOG_ERROR, TAG, "Failed to process audio.");

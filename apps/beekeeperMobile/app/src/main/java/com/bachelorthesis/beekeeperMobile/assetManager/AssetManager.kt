@@ -44,6 +44,8 @@ class AssetManager(private val context: Context) {
     // NEW: Path for the Whisper model.
     private val whisperModelFile = File(baseModelDir, "whisper/${BuildConfig.WHISPER_MODEL_FILENAME}")
 
+    private val vadModelFile = File(baseModelDir, "vad/${BuildConfig.VAD_MODEL_FILENAME}")
+
 
     /**
      * Checks if the Vosk model is fully unzipped and ready.
@@ -67,6 +69,10 @@ class AssetManager(private val context: Context) {
         return whisperModelFile.exists() && whisperModelFile.length() > 0
     }
 
+    private fun isVadReady(): Boolean {
+        return vadModelFile.exists() && vadModelFile.length() > 0
+    }
+
     /**
      * Public method to check if all required model assets are present and ready for use.
      * @return true if all models are present, false otherwise.
@@ -74,9 +80,10 @@ class AssetManager(private val context: Context) {
     fun checkPrerequisites(): Boolean {
         val voskReady = isVoskReady()
         val llmReady = isLlmReady()
-        val whisperReady = isWhisperReady() // MODIFIED: Add whisper check
-        Log.d(TAG, "Prerequisite check: Vosk ready? $voskReady, LLM ready? $llmReady, Whisper ready? $whisperReady")
-        return voskReady && llmReady && whisperReady // MODIFIED: Include whisper in the final result
+        val whisperReady = isWhisperReady()
+        val vadReady = isVadReady()
+        Log.d(TAG, "Prerequisite check: Vosk ready? $voskReady, LLM ready? $llmReady, Whisper ready? $whisperReady, VAD ready ? $vadReady")
+        return voskReady && llmReady && whisperReady && vadReady // MODIFIED: Include whisper in the final result
     }
 
     /**
@@ -135,6 +142,24 @@ class AssetManager(private val context: Context) {
                 .setDestinationInExternalFilesDir(context, "models/whisper", BuildConfig.WHISPER_MODEL_FILENAME)
                 .setAllowedOverMetered(true)
             downloadIds.add(downloadManager.enqueue(whisperRequest))
+        }
+
+        if (!isVadReady()) {
+            Log.w(TAG, "VAD model is not ready. Cleaning up and queueing for download.")
+            vadModelFile.delete()
+            vadModelFile.parentFile?.mkdirs()
+
+            val vadRequest = DownloadManager.Request(BuildConfig.VAD_MODEL_URL.toUri())
+                .setTitle("Downloading VAD Model")
+                .setDescription("Required for voice activity detection.")
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setDestinationInExternalFilesDir(
+                    context,
+                    "models/vad",
+                    BuildConfig.VAD_MODEL_FILENAME
+                )
+                .setAllowedOverMetered(true)
+            downloadIds.add(downloadManager.enqueue(vadRequest))
         }
 
         if (downloadIds.isEmpty()) {
@@ -229,6 +254,8 @@ class AssetManager(private val context: Context) {
      * NEW: Provides the absolute path to the downloaded Whisper model file.
      */
     fun getWhisperModelPath(): File = whisperModelFile
+
+    fun getVadModelPath(): File = vadModelFile
 
     companion object {
         private const val TAG = "AssetManager"

@@ -1,6 +1,7 @@
 package com.bachelorthesis.beekeeperMobile.speechEngine
 
 import android.content.Context
+import com.bachelorthesis.beekeeperMobile.assetManager.AssetManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -30,15 +31,13 @@ class SpeechEngine(
     // NEW: WhisperTranscriber for command transcription
     private var whisperTranscriber: WhisperTranscriber? = null
 
+    private val assetManager = AssetManager(context)
+
     @Volatile private var currentState = State.STOPPED
 
     private enum class State { STOPPED, INITIALIZING, IDLE_HOTWORD, LISTENING_COMMAND }
 
-    fun initialize(
-        voskModelPath: String,
-        whisperModelPath: String, // NEW: Path for the whisper model
-        onInitialized: (success: Boolean) -> Unit
-    ) {
+    fun initialize(voskModelPath: String, onInitialized: (success: Boolean) -> Unit) {
         if (currentState != State.STOPPED) return
         currentState = State.INITIALIZING
 
@@ -54,15 +53,14 @@ class SpeechEngine(
                 this@SpeechEngine.voskModel = Model(voskModelPath)
                 AndroidLog.d(TAG, "Vosk model initialized.")
 
-                // Initialize WhisperTranscriber for commands
+                // Initialize WhisperTranscriber
                 whisperTranscriber = WhisperTranscriber(context) { transcribedText ->
-                    // This is the listener for our transcriber
                     listener.onCommandTranscribed(transcribedText)
-                    // IMPORTANT: After transcribing one chunk, go back to listening for the hotword
                     startListeningForHotword()
                 }
 
-                val whisperSuccess = whisperTranscriber?.initialize(whisperModelPath) ?: false
+                // The transcriber now gets paths from AssetManager itself
+                val whisperSuccess = whisperTranscriber?.initialize(assetManager) ?: false
                 if (!whisperSuccess) {
                     listener.onError("Failed to initialize Whisper transcriber.")
                     onInitialized(false)

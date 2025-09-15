@@ -10,6 +10,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.util.Log
 import androidx.core.app.ActivityCompat
+import com.bachelorthesis.beekeeperMobile.assetManager.AssetManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -25,6 +26,8 @@ class WhisperTranscriber(
     private var recordingJob: Job? = null
     private var whisperContextPtr: Long = 0L
 
+    private var vadModelPath: String = ""
+
     private var audioRecord: AudioRecord? = null
     private var bufferSizeInBytes: Int = 0
 
@@ -32,16 +35,23 @@ class WhisperTranscriber(
 
     companion object {
         private const val TAG = "WhisperTranscriber"
-        private const val SAMPLE_RATE = 16000 // Whisper requires 16kHz
+        private const val SAMPLE_RATE = 16000
         private const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
-        private const val CHUNK_DURATION_SECONDS = 5 // Process audio every 5 seconds
-        private const val BUFFER_SIZE_SECONDS = CHUNK_DURATION_SECONDS * 2
+        // We can process audio in larger chunks now since VAD handles silence
+        private const val CHUNK_DURATION_SECONDS = 5
     }
 
-    suspend fun initialize(modelPath: String): Boolean = withContext(Dispatchers.IO) {
+    // MODIFIED: Pass AssetManager to get model paths
+    suspend fun initialize(assetManager: AssetManager): Boolean = withContext(Dispatchers.IO) {
+        val modelPath = assetManager.getWhisperModelPath().absolutePath
+        vadModelPath = assetManager.getVadModelPath().absolutePath
+
         Log.d(TAG, "Initializing with model: $modelPath")
+
+        // Call the simplified initContext
         whisperContextPtr = LibWhisper.initContext(modelPath)
+
         if (whisperContextPtr == 0L) {
             Log.e(TAG, "Failed to initialize Whisper context.")
             return@withContext false
@@ -59,14 +69,14 @@ class WhisperTranscriber(
             if (!setupAudioRecord()) return@launch
 
             audioRecord?.startRecording()
-            Log.i(TAG, "Recording started.")
+            Log.i(TAG, "Recording started (with internal VAD).")
 
             val audioBuffer = ShortArray(SAMPLE_RATE * CHUNK_DURATION_SECONDS)
             while (isActive) {
                 val readSize = audioRecord?.read(audioBuffer, 0, audioBuffer.size) ?: 0
                 if (readSize > 0) {
                     val floatArray = convertShortArrayToFloatArray(audioBuffer, readSize)
-                    val result = LibWhisper.transcribe(whisperContextPtr, nThreads, floatArray)
+                    val result = LibWhisper.transcribe(whisperContextPtr, nThreads, floatArray, vadModelPath)
                     if (result.isNotBlank()) {
                         withContext(Dispatchers.Main) {
                             listener(result)
@@ -109,7 +119,7 @@ class WhisperTranscriber(
             SAMPLE_RATE,
             CHANNEL_CONFIG,
             AUDIO_FORMAT,
-            bufferSizeInBytes * BUFFER_SIZE_SECONDS
+            bufferSizeInBytes
         )
         return true
     }

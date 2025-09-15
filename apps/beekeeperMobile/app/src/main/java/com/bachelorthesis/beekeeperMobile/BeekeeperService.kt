@@ -129,11 +129,9 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
     private fun initializeSpeechEngine() {
         speechEngine = SpeechEngine(this, this).apply {
             val voskPath = assetManager.getVoskModelPath().absolutePath
-            // MODIFIED: Get the whisper model path from the asset manager
-            val whisperPath = assetManager.getWhisperModelPath().absolutePath
 
             // MODIFIED: Call the updated initialize method with both paths
-            initialize(voskPath, whisperPath) { success ->
+            initialize(voskPath) { success ->
                 if (success) {
                     AndroidLog.d(TAG, "Speech Engine Initialized successfully.")
                     isSpeechEngineReady = true
