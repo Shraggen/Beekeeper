@@ -121,7 +121,7 @@ class MainActivity : AppCompatActivity() {
     private fun checkAssets() {
         updateUiForState(AppState.INITIALIZING, "Checking for AI models...")
         if (assetManager.checkPrerequisites()) {
-            AndroidLog.i(TAG, "All models are ready.")
+            AndroidLog.i(TAG, "All models are ready .")
             updateUiForState(AppState.READY_TO_START)
         } else {
             AndroidLog.w(TAG, "Models not found. Starting download.")

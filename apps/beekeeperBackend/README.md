@@ -99,4 +99,4 @@ The API is organized around three main resources. All endpoints are prefixed wit
   * GET /tasks/{id}: Get a specific task by its ID.  
   * PUT /tasks/{id}: Update a task.  
   * DELETE /tasks/{id}: Delete a task.  
-  * GET /tasks/last: Get the most recent task.
+  * GET /tasks/last: Get the most recent task. 

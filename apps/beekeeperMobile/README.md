@@ -100,4 +100,4 @@ Here are the primary commands you can use:
   *Example: "Read last note for beehive five"*  
   The app will read the content of the most recent log for that hive aloud.  
 * **Get help:**"Help" or "What can I say"  
-  The app will list the available commands.
+  The app will list the available commands. 

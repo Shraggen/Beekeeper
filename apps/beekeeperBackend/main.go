@@ -61,7 +61,7 @@ func main() {
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	// Start the server
-	log.Printf("Server starting on port %s", cfg.Port)
+	log.Printf("Server starting on port  %s", cfg.Port)
 	if err := router.Run(":" + cfg.Port); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
