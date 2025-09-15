@@ -14,7 +14,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    id("com.google.devtools.ksp") version "2.2.10-2.0.2"
+    id("com.google.devtools.ksp") version "2.2.20-2.0.3"
     id("com.google.dagger.hilt.android") version "2.57.1"
 
 }
@@ -162,6 +162,7 @@ dependencies {
     implementation(libs.room.ktx)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.preference.ktx)
+    implementation(libs.androidx.runtime)
     ksp(libs.room.compiler)
 
     // Test dependencies
@@ -172,6 +173,8 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+    testImplementation(libs.mockk)
+    testImplementation(libs.kotlinx.coroutines.test)
 
     //LLM
     implementation(libs.tasks.genai)
@@ -180,13 +183,31 @@ dependencies {
     implementation("com.google.mediapipe:tasks-audio:latest.release")
 
 
-    // Hilt Dependencies
+    // Hilt dependencies
     implementation(libs.hilt.android)
     ksp(libs.hilt.android.compiler)
 
     // Hilt support for WorkManager
     implementation(libs.androidx.hilt.work)
     ksp(libs.androidx.hilt.compiler)
+
+    // Dependencies for unit tests
+    testImplementation(libs.junit)
+    testImplementation(libs.mockk)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.work.testing)
+
+    // Hilt testing dependencies
+    testImplementation(libs.hilt.android.testing)
+    kspTest(libs.hilt.android.compiler)
+    kspTest(libs.androidx.hilt.compiler)
+
+    // Dependencies for instrumented tests
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.ui.test.junit4)
 
     implementation(libs.androidx.preference.ktx)
 }
