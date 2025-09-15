@@ -11,11 +11,9 @@ on:
       - main
 
 jobs:
-  # This first job is new. It runs on every push and determines which parts of the repo have changed.
   filter-paths:
     name: Determine Changed Paths
     runs-on: ubuntu-latest
-    # We need to output the results of the filter so other jobs can use them
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       android: ${{ steps.filter.outputs.android }}
@@ -23,11 +21,11 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Run Path Filter
         uses: dorny/paths-filter@v3
-        id: filter # Give the step an ID so we can refer to its outputs
+        id: filter
         with:
           filters: |
             backend:
@@ -37,12 +35,10 @@ jobs:
             workflow:
               - '.github/workflows/**'
 
-  # The backend job now depends on the filter job
   backend-ci:
     name: Backend CI
     runs-on: ubuntu-latest
-    needs: filter-paths # This job will not start until 'filter-paths' is complete
-    # The 'if' condition is now much simpler and more reliable
+    needs: filter-paths
     if: needs.filter-paths.outputs.backend == 'true' || needs.filter-paths.outputs.workflow == 'true'
 
     steps:
@@ -61,7 +57,25 @@ jobs:
           go build -o beekeeper-backend
         working-directory: ./apps/beekeeperBackend
 
-  # The android job also depends on the filter job
+      # --- NEW: Backend Security Steps ---
+      - name: Install govulncheck (SCA)
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck scan (SCA)
+        run: govulncheck ./...
+        working-directory: ./apps/beekeeperBackend
+
+      - name: Run GoSec Security Scanner (SAST)
+        uses: securego/gosec@master
+        with:
+          args: '-no-fail -fmt sarif -out apps/beekeeperBackend/results.sarif ./apps/beekeeperBackend/...'
+
+      - name: Upload SARIF file for GitHub Advanced Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: apps/beekeeperBackend/results.sarif
+          category: 'Go Security Scan'
+
   android-ci:
     name: Android CI
     runs-on: ubuntu-latest
@@ -93,6 +107,24 @@ jobs:
         working-directory: ./apps/beekeeperMobile
 
       - name: Lint and Test Android App
-        # We use 'test' which automatically runs lint and all local unit tests.
         run: ./gradlew test
         working-directory: ./apps/beekeeperMobile
+
+      # --- NEW: Android Security Steps ---
+      - name: Initialize CodeQL (SAST)
+        uses: github/codeql-action/init@v3
+        with:
+          languages: java # Specify Java as we are scanning the Kotlin/Java code
+          queries: +security-and-quality
+
+      # We must run the build AFTER initializing CodeQL
+      - name: Build Android App for CodeQL Analysis
+        run: ./gradlew assembleDebug
+        working-directory: ./apps/beekeeperMobile
+
+      - name: Perform CodeQL Analysis (SAST)
+        uses: github/codeql-action/analyze@v3
+
+      # Note: For Android, SCA is best handled by Dependabot, which we'll enable next.
+      # A manual Gradle dependency check can be added here but is often slow and noisy.
+      # Dependabot is the industry standard.
