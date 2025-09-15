@@ -54,6 +54,11 @@
 -dontwarn javax.**
 -dontwarn com.google.mediapipe.proto.**
 
+# Ignore missing Android XR classes
+-dontwarn com.android.extensions.xr.**
+-dontwarn com.google.androidxr.**
+-dontwarn com.google.imp.splitengine.**
+
 #=================================================================#
 # END OF BEEKEEPER PROJECT RULES                                  #
 #=================================================================#
