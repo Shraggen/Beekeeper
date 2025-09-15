@@ -1,33 +1,30 @@
 package com.bachelorthesis.beekeeperMobile.sync
 
 import android.content.Context
-import android.util.Log as AndroidLog
+import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.bachelorthesis.beekeeperMobile.persistance.AppDatabase
 import com.bachelorthesis.beekeeperMobile.persistance.LogRepository
-import com.bachelorthesis.beekeeperMobile.persistance.RetrofitClient
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedInject
+import android.util.Log as AndroidLog
 
 /**
  * A Worker that handles the synchronization of unsynced log entries from the local
  * Room database to the remote backend API.
  * It uses the LogRepository to manage data access.
  */
-class SyncWorker(
-    appContext: Context,
-    workerParams: WorkerParameters
+@HiltWorker
+class SyncWorker @AssistedInject constructor(
+    @Assisted appContext: Context,
+    @Assisted workerParams: WorkerParameters,
+    private val logRepository: LogRepository
 ) : CoroutineWorker(appContext, workerParams) {
 
     private val TAG = "SyncWorker"
 
     override suspend fun doWork(): Result {
         AndroidLog.i(TAG, "Starting log synchronization task...")
-
-        // Initialize repository within the worker's context
-        // In a more complex app, this might be handled via Hilt/Koin for proper DI
-        val appDatabase = AppDatabase.getDatabase(applicationContext)
-        val apiService = RetrofitClient.instance
-        val logRepository = LogRepository(appDatabase.logDao(), apiService)
 
         val unsyncedLogs = logRepository.getUnsyncedLogs()
         if (unsyncedLogs.isEmpty()) {

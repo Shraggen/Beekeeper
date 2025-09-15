@@ -1,3 +1,5 @@
+@file:Suppress("UnstableApiUsage")
+
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Properties
 import java.io.FileInputStream
@@ -13,6 +15,8 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     id("com.google.devtools.ksp") version "2.2.10-2.0.2"
+    id("com.google.dagger.hilt.android") version "2.57.1"
+
 }
 
 android {
@@ -174,6 +178,15 @@ dependencies {
     implementation("com.google.mediapipe:tasks-vision:latest.release")
     implementation("com.google.mediapipe:tasks-text:latest.release")
     implementation("com.google.mediapipe:tasks-audio:latest.release")
+
+
+    // Hilt Dependencies
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.android.compiler)
+
+    // Hilt support for WorkManager
+    implementation(libs.androidx.hilt.work)
+    ksp(libs.androidx.hilt.compiler)
 
     implementation(libs.androidx.preference.ktx)
 }

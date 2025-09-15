@@ -19,16 +19,12 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.bachelorthesis.beekeeperMobile.assetManager.AssetManager
 import com.bachelorthesis.beekeeperMobile.intentRecognizer.IntentRecognizer
-import com.bachelorthesis.beekeeperMobile.intentRecognizer.LLMIntentRecognizer
-import com.bachelorthesis.beekeeperMobile.intentRecognizer.RegexIntentRecognizer
 import com.bachelorthesis.beekeeperMobile.intentRecognizer.StructuredIntent
-import com.bachelorthesis.beekeeperMobile.persistance.AppDatabase // NEW
-import com.bachelorthesis.beekeeperMobile.persistance.ApiService // NEW
 import com.bachelorthesis.beekeeperMobile.persistance.LogRepository // NEW
-import com.bachelorthesis.beekeeperMobile.persistance.RetrofitClient // NEW
 import com.bachelorthesis.beekeeperMobile.speechEngine.SpeechEngine
 import com.bachelorthesis.beekeeperMobile.speechEngine.SpeechEngineListener
 import com.bachelorthesis.beekeeperMobile.sync.SyncWorker
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -36,20 +32,23 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineListener {
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private var speechEngine: SpeechEngine? = null
-    private var intentRecognizer: IntentRecognizer? = null
     private var textToSpeech: TextToSpeech? = null
-    private lateinit var assetManager: AssetManager
 
-    // NEW: Database and Repository instances
-    private lateinit var appDatabase: AppDatabase
-    private lateinit var apiService: ApiService
-    private lateinit var logRepository: LogRepository
+    // --- INJECTED DEPENDENCIES ---
+    @Inject
+    lateinit var assetManager: AssetManager // Injected!
+    @Inject
+    lateinit var intentRecognizer: IntentRecognizer // Injected!
+    @Inject
+    lateinit var logRepository: LogRepository
 
     private enum class ServiceState {
         STOPPED, INITIALIZING, IDLE, AWOKEN, AWAITING_NOTE, AWAITING_ANSWER, PROCESSING, SPEAKING
@@ -74,8 +73,6 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
         setupNotificationChannel()
         transitionToState(ServiceState.INITIALIZING)
 
-        assetManager = AssetManager(this)
-
         if (!assetManager.checkPrerequisites()) {
             AndroidLog.e(TAG, "Prerequisites not met. Models are not available.")
             handleError("AI models not found. Please run the app's main screen to download them.", true)
@@ -87,24 +84,53 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
         preferredLocale = Locale.forLanguageTag(languageTag)
         AndroidLog.d(TAG, "Service started with preferred language: ${preferredLocale.toLanguageTag()}")
 
-        serviceScope.launch {
-            // NEW: Initialize Database, API Service, and Repository
-            appDatabase = AppDatabase.getDatabase(applicationContext)
-            apiService = RetrofitClient.instance // Reusing the singleton Retrofit instance
-            logRepository = LogRepository(appDatabase.logDao(), apiService)
-            isDatabaseReady = true
-            isRepositoryReady = true
-            AndroidLog.d(TAG, "Database and Repository initialized.")
 
+        serviceScope.launch {
+            // TextToSpeech is tied to the service lifecycle, so we still create it here.
             textToSpeech = TextToSpeech(this@BeekeeperService, this@BeekeeperService)
-            initializeIntentRecognizerWithFallback()
+
+            // Initialize the injected recognizer
+            initializeIntentRecognizer()
+
+            // SpeechEngine is also tied to the service lifecycle (needs a listener).
+            // We create it here but pass it its dependencies (which we got from DI).
             initializeSpeechEngine()
 
-            checkInitializationComplete() // Re-check after DB/Repo are ready
             scheduleLogSyncWorker()
+        }
+
+    }
+
+    private fun initializeSpeechEngine() {
+        // We create it here, but its dependencies are clean.
+        speechEngine = SpeechEngine(this, this, assetManager) // Pass the injected AssetManager
+        speechEngine?.initialize { success ->
+            if (success) {
+                AndroidLog.d(TAG, "Speech Engine Initialized successfully.")
+                isSpeechEngineReady = true
+                checkInitializationComplete()
+            } else {
+                handleError("Speech Engine could not start", true)
+            }
         }
     }
 
+    private fun initializeIntentRecognizer() {
+        AndroidLog.i(TAG, "Initializing intent recognizer: ${intentRecognizer.javaClass.simpleName}")
+
+        // The logic for fallback is now handled in the AppModule. Here we just initialize.
+        val modelPath = assetManager.getLlmModelPath().absolutePath
+        intentRecognizer.initialize(this, modelPath) { success ->
+            if (success) {
+                isIntentRecognizerReady = true
+                checkInitializationComplete()
+            } else {
+                // This would happen if the LLM model file exists but is corrupt.
+                // In this rare case, we can't recover, so we should error out.
+                handleError("The primary intent recognizer failed to initialize.", true)
+            }
+        }
+    }
 
     private fun scheduleLogSyncWorker() {
         val constraints = Constraints.Builder()
@@ -124,46 +150,6 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
             periodicSyncRequest
         )
         AndroidLog.d(TAG, "Log synchronization worker scheduled.")
-    }
-
-    private fun initializeSpeechEngine() {
-        speechEngine = SpeechEngine(this, this).apply {
-            val voskPath = assetManager.getVoskModelPath().absolutePath
-
-            // MODIFIED: Call the updated initialize method with both paths
-            initialize(voskPath) { success ->
-                if (success) {
-                    AndroidLog.d(TAG, "Speech Engine Initialized successfully.")
-                    isSpeechEngineReady = true
-                    checkInitializationComplete()
-                } else {
-                    handleError("Speech Engine could not start", true)
-                }
-            }
-        }
-    }
-
-    private fun initializeIntentRecognizerWithFallback() {
-        AndroidLog.i(TAG, "Attempting to initialize LLM Intent Recognizer...")
-        val llmRecognizer = LLMIntentRecognizer()
-        val llmPath = assetManager.getLlmModelPath().absolutePath
-
-        llmRecognizer.initialize(this, llmPath) { success ->
-            if (success) {
-                this.intentRecognizer = llmRecognizer
-                isIntentRecognizerReady = true
-                checkInitializationComplete()
-            } else {
-                AndroidLog.w(TAG, "LLM Recognizer failed to initialize. Falling back to Regex Recognizer.")
-                llmRecognizer.close()
-                val regexRecognizer = RegexIntentRecognizer()
-                regexRecognizer.initialize(this) {
-                    this.intentRecognizer = regexRecognizer
-                    isIntentRecognizerReady = true
-                    checkInitializationComplete()
-                }
-            }
-        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -197,7 +183,7 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
         AndroidLog.d(TAG, "Service Destroying...")
         serviceScope.cancel()
         speechEngine?.destroy()
-        intentRecognizer?.close()
+        intentRecognizer.close()
         textToSpeech?.stop()
         textToSpeech?.shutdown()
         // No explicit shutdown for Room database needed, as it's typically managed by the app process.
@@ -219,7 +205,7 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
             AndroidLog.i(TAG, "Command received: '$text'. Sending to LLM.")
             transitionToState(ServiceState.PROCESSING)
             speak(getString(R.string.tts_response_processing), UTTERANCE_ID_PROMPT_FOR_COMMAND) // MODIFIED
-            intentRecognizer?.recognizeIntent(text, preferredLocale, ::processStructuredIntent)
+            intentRecognizer.recognizeIntent(text, preferredLocale, ::processStructuredIntent)
         }
     }
 

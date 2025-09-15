@@ -132,7 +132,7 @@ class LLMIntentRecognizer : IntentRecognizer {
         return try {
             val jsonObject = JSONObject(jsonString)
             val intent = jsonObject.optString("intent", "unknown")
-            val responseText = jsonObject.optString("responseText", null) // Extract the new field
+            val responseText = jsonObject.optString("responseText", "")
             val entitiesJson = jsonObject.optJSONObject("entities")
             val entities = mutableMapOf<String, String>()
 

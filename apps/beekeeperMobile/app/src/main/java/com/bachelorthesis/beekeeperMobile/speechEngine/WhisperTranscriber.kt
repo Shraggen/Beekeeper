@@ -20,6 +20,7 @@ import kotlinx.coroutines.withContext
 
 class WhisperTranscriber(
     private val context: Context,
+    private val assetManager: AssetManager,
     private val listener: (String) -> Unit
 ) {
     private val scope = CoroutineScope(Dispatchers.IO)
@@ -38,12 +39,10 @@ class WhisperTranscriber(
         private const val SAMPLE_RATE = 16000
         private const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
-        // We can process audio in larger chunks now since VAD handles silence
         private const val CHUNK_DURATION_SECONDS = 5
     }
 
-    // MODIFIED: Pass AssetManager to get model paths
-    suspend fun initialize(assetManager: AssetManager): Boolean = withContext(Dispatchers.IO) {
+    suspend fun initialize(): Boolean = withContext(Dispatchers.IO) {
         val modelPath = assetManager.getWhisperModelPath().absolutePath
         vadModelPath = assetManager.getVadModelPath().absolutePath
 

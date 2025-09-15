@@ -11,15 +11,14 @@ import org.json.JSONObject
 import org.vosk.Model
 import org.vosk.Recognizer
 import org.vosk.android.SpeechService
-import java.io.File
 import java.io.IOException
 import android.util.Log as AndroidLog
 import org.vosk.android.RecognitionListener as VoskRecognitionListener
 
-// NOTE: This class no longer needs AndroidRecognitionListener
 class SpeechEngine(
     private val context: Context,
-    private val listener: SpeechEngineListener
+    private val listener: SpeechEngineListener,
+    private val assetManager: AssetManager
 ) : VoskRecognitionListener {
 
     private val engineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -31,22 +30,21 @@ class SpeechEngine(
     // NEW: WhisperTranscriber for command transcription
     private var whisperTranscriber: WhisperTranscriber? = null
 
-    private val assetManager = AssetManager(context)
-
     @Volatile private var currentState = State.STOPPED
 
     private enum class State { STOPPED, INITIALIZING, IDLE_HOTWORD, LISTENING_COMMAND }
 
-    fun initialize(voskModelPath: String, onInitialized: (success: Boolean) -> Unit) {
+    fun initialize(onInitialized: (success: Boolean) -> Unit) {
         if (currentState != State.STOPPED) return
         currentState = State.INITIALIZING
 
         engineScope.launch {
             try {
                 // Initialize Vosk for hotword
-                val voskModelFile = File(voskModelPath)
+                val voskModelPath = assetManager.getVoskModelPath().absolutePath
+                val voskModelFile = assetManager.getVoskModelPath().absoluteFile
                 if (!voskModelFile.exists() || !voskModelFile.isDirectory) {
-                    listener.onError("Vosk model path is invalid: $voskModelPath")
+                    listener.onError("Vosk model path is invalid: ${voskModelPath}")
                     onInitialized(false)
                     return@launch
                 }
@@ -54,13 +52,13 @@ class SpeechEngine(
                 AndroidLog.d(TAG, "Vosk model initialized.")
 
                 // Initialize WhisperTranscriber
-                whisperTranscriber = WhisperTranscriber(context) { transcribedText ->
+                whisperTranscriber = WhisperTranscriber(context, assetManager) { transcribedText ->
                     listener.onCommandTranscribed(transcribedText)
                     startListeningForHotword()
                 }
 
                 // The transcriber now gets paths from AssetManager itself
-                val whisperSuccess = whisperTranscriber?.initialize(assetManager) ?: false
+                val whisperSuccess = whisperTranscriber?.initialize() ?: false
                 if (!whisperSuccess) {
                     listener.onError("Failed to initialize Whisper transcriber.")
                     onInitialized(false)
