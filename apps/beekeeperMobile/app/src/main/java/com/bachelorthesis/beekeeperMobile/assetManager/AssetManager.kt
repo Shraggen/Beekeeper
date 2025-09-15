@@ -1,3 +1,5 @@
+// In apps/beekeeperMobile/app/src/main/java/com/bachelorthesis/beekeeperMobile/assetManager/AssetManager.kt
+
 package com.bachelorthesis.beekeeperMobile.assetManager
 
 import android.app.DownloadManager
@@ -39,6 +41,11 @@ class AssetManager(private val context: Context) {
     private val baseModelDir = File(context.getExternalFilesDir(null), "models")
     private val voskModelDir = File(baseModelDir, "vosk/model-en-us")
     private val llmModelFile = File(baseModelDir, "llm/${BuildConfig.LLM_MODEL_FILENAME}")
+    // NEW: Path for the Whisper model.
+    private val whisperModelFile = File(baseModelDir, "whisper/${BuildConfig.WHISPER_MODEL_FILENAME}")
+
+    private val vadModelFile = File(baseModelDir, "vad/${BuildConfig.VAD_MODEL_FILENAME}")
+
 
     /**
      * Checks if the Vosk model is fully unzipped and ready.
@@ -56,14 +63,27 @@ class AssetManager(private val context: Context) {
     }
 
     /**
+     * NEW: Checks if the Whisper model file is downloaded and not empty.
+     */
+    private fun isWhisperReady(): Boolean {
+        return whisperModelFile.exists() && whisperModelFile.length() > 0
+    }
+
+    private fun isVadReady(): Boolean {
+        return vadModelFile.exists() && vadModelFile.length() > 0
+    }
+
+    /**
      * Public method to check if all required model assets are present and ready for use.
      * @return true if all models are present, false otherwise.
      */
     fun checkPrerequisites(): Boolean {
         val voskReady = isVoskReady()
         val llmReady = isLlmReady()
-        Log.d(TAG, "Prerequisite check: Vosk ready? $voskReady, LLM ready? $llmReady")
-        return voskReady && llmReady
+        val whisperReady = isWhisperReady()
+        val vadReady = isVadReady()
+        Log.d(TAG, "Prerequisite check: Vosk ready? $voskReady, LLM ready? $llmReady, Whisper ready? $whisperReady, VAD ready ? $vadReady")
+        return voskReady && llmReady && whisperReady && vadReady // MODIFIED: Include whisper in the final result
     }
 
     /**
@@ -107,6 +127,39 @@ class AssetManager(private val context: Context) {
                 .setDestinationInExternalFilesDir(context, "models/llm", BuildConfig.LLM_MODEL_FILENAME)
                 .setAllowedOverMetered(true)
             downloadIds.add(downloadManager.enqueue(llmRequest))
+        }
+
+        // NEW: --- Whisper Model Check and Cleanup ---
+        if (!isWhisperReady()) {
+            Log.w(TAG, "Whisper model is not ready. Cleaning up and queueing for download.")
+            whisperModelFile.delete()
+            whisperModelFile.parentFile?.mkdirs()
+
+            val whisperRequest = DownloadManager.Request(BuildConfig.WHISPER_MODEL_URL.toUri())
+                .setTitle("Downloading Whisper ASR Model")
+                .setDescription("Required for offline Serbian transcription.")
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setDestinationInExternalFilesDir(context, "models/whisper", BuildConfig.WHISPER_MODEL_FILENAME)
+                .setAllowedOverMetered(true)
+            downloadIds.add(downloadManager.enqueue(whisperRequest))
+        }
+
+        if (!isVadReady()) {
+            Log.w(TAG, "VAD model is not ready. Cleaning up and queueing for download.")
+            vadModelFile.delete()
+            vadModelFile.parentFile?.mkdirs()
+
+            val vadRequest = DownloadManager.Request(BuildConfig.VAD_MODEL_URL.toUri())
+                .setTitle("Downloading VAD Model")
+                .setDescription("Required for voice activity detection.")
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setDestinationInExternalFilesDir(
+                    context,
+                    "models/vad",
+                    BuildConfig.VAD_MODEL_FILENAME
+                )
+                .setAllowedOverMetered(true)
+            downloadIds.add(downloadManager.enqueue(vadRequest))
         }
 
         if (downloadIds.isEmpty()) {
@@ -177,14 +230,14 @@ class AssetManager(private val context: Context) {
      *
      * @return true if cleanup was successful, false otherwise.
      */
-    suspend fun cleanup() = withContext(Dispatchers.IO) {
+    suspend fun cleanup(): Boolean = withContext(Dispatchers.IO) {
         if (baseModelDir.exists()) {
             val success = baseModelDir.deleteRecursively()
             Log.i(TAG, "Cleanup of all models ${if (success) "succeeded" else "failed"}.")
             return@withContext success
         }
         Log.i(TAG, "Cleanup unnecessary, model directory does not exist.")
-        true
+        return@withContext true
     }
 
     /**
@@ -196,6 +249,13 @@ class AssetManager(private val context: Context) {
      * Provides the absolute path to the downloaded LLM model file.
      */
     fun getLlmModelPath(): File = llmModelFile
+
+    /**
+     * NEW: Provides the absolute path to the downloaded Whisper model file.
+     */
+    fun getWhisperModelPath(): File = whisperModelFile
+
+    fun getVadModelPath(): File = vadModelFile
 
     companion object {
         private const val TAG = "AssetManager"

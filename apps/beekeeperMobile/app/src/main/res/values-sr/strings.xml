@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- General App Strings -->
+    <string name="app_name">Beekeeper</string>
+    <string name="start_listening_session">Pokreni Sesiju Slušanja</string>
+    <string name="stop_listening_session">Zaustavi Sesiju Slušanja</string>
+    <string name="initializing">Inicijalizacija…</string>
+    <string name="clear_downloaded_models">Obriši Preuzete Modele</string>
+    <string name="settings_title">Podešavanja</string>
+
+    <!-- Language Preference Strings -->
+    <string name="settings_category_language">Podešavanja Jezika</string>
+    <string name="settings_language_title">Željeni Jezik Glasa</string>
+    <string name="settings_language_summary">Izaberite jezik za glasovne komande i odgovore</string>
+
+    <!-- NEW: Voice Command Responses (Serbian) -->
+    <string name="tts_response_yes">Da?</string>
+    <string name="tts_response_processing">Obrađujem...</string>
+    <string name="tts_response_ready_to_record">U redu, spreman sam da zabeležim vašu belešku za košnicu %1$d.</string>
+    <string name="tts_response_note_saved">Beleška sačuvana za košnicu %1$d.</string>
+    <string name="tts_response_last_note_is">Poslednja beleška je: %1$s</string>
+    <string name="tts_response_no_notes_found">Nema beležaka za košnicu %1$d.</string>
+    <string name="tts_response_last_task_is">Poslednji zadatak je: %1$s</string>
+    <string name="tts_response_no_tasks_found">Nema zadataka za košnicu %1$d.</string>
+    <string name="tts_error_no_hive_number_note">Žao mi je, nisam razumeo broj košnice za tu belešku.</string>
+    <string name="tts_error_no_hive_number_log">Žao mi je, nisam razumeo za koju košnicu želite poslednju belešku.</string>
+    <string name="tts_error_no_hive_number_task">Žao mi je, nisam razumeo za koju košnicu želite poslednji zadatak.</string>
+    <string name="tts_error_unknown_command">Žao mi je, nisam razumeo tu komandu. Možete tražiti da kreiram belešku ili pročitam poslednju belešku ili zadatak.</string>
+    <string name="tts_error_generic">Došlo je do greške: %1$s</string>
+
+</resources>

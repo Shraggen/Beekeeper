@@ -1,3 +1,5 @@
+@file:Suppress("UnstableApiUsage")
+
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Properties
 import java.io.FileInputStream
@@ -13,6 +15,8 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     id("com.google.devtools.ksp") version "2.2.10-2.0.2"
+    id("com.google.dagger.hilt.android") version "2.57.1"
+
 }
 
 android {
@@ -35,18 +39,25 @@ android {
 
     defaultConfig {
         applicationId = "com.bachelorthesis.beekeeperMobile"
-        minSdk = 34
+        minSdk = 33
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+		
+		externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++17" // Use C++17 standard
+            }
+        }
 
         ndk {
-            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86_64", "x86"))
+            abiFilters.addAll(listOf("arm64-v8a"))
         }
 
         ndkVersion = "25.2.9519653"
+        signingConfig = signingConfigs.getByName("debug")
 
     }
 
@@ -61,15 +72,49 @@ android {
             buildConfigField("String", "VOSK_MODEL_URL", "\"https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip\"")
             buildConfigField("String", "VOSK_ZIP_FILENAME", "\"vosk-model-small-en-us-0.15.zip\"")
 
-            buildConfigField("String", "LLM_MODEL_URL", "\"https://github.com/Shraggen/Beekeeper/releases/download/v1.0.0/gemma3-270m-it-q8.task\"")
+            buildConfigField("String", "LLM_MODEL_URL", "\"https://huggingface.co/litert-community/gemma-3-270m-it/resolve/main/gemma3-270m-it-q8.task\"")
             buildConfigField("String", "LLM_MODEL_FILENAME", "\"gemma3-270m-it-q8.task\"")
+
+            buildConfigField("String", "WHISPER_MODEL_URL", "\"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q8_0.bin\"")
+            buildConfigField("String", "WHISPER_MODEL_FILENAME", "\"ggml-base-q8_0.bin\"")
+
+            buildConfigField("String", "VAD_MODEL_URL", "\"https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin\"")
+            buildConfigField("String", "VAD_MODEL_FILENAME", "\"ggml-silero-v5.1.2.bin\"")
+			
+			externalNativeBuild {
+                cmake {
+                    // This enables high-performance builds
+                    cFlags += "-O3"
+                    cppFlags += "-O3"
+                }
+            }
         }
         debug {
             buildConfigField("String", "VOSK_MODEL_URL", "\"https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip\"")
             buildConfigField("String", "VOSK_ZIP_FILENAME", "\"vosk-model-small-en-us-0.15.zip\"")
 
-            buildConfigField("String", "LLM_MODEL_URL", "\"https://github.com/Shraggen/Beekeeper/releases/download/v1.0.0/gemma3-270m-it-q8.task\"")
+            buildConfigField("String", "LLM_MODEL_URL", "\"https://huggingface.co/litert-community/gemma-3-270m-it/resolve/main/gemma3-270m-it-q8.task\"")
             buildConfigField("String", "LLM_MODEL_FILENAME", "\"gemma3-270m-it-q8.task\"")
+
+            buildConfigField("String", "WHISPER_MODEL_URL", "\"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q8_0.bin\"")
+            buildConfigField("String", "WHISPER_MODEL_FILENAME", "\"ggml-base-q8_0.bin\"")
+
+            buildConfigField("String", "VAD_MODEL_URL", "\"https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin\"")
+            buildConfigField("String", "VAD_MODEL_FILENAME", "\"ggml-silero-v5.1.2.bin\"")
+
+            externalNativeBuild {
+                cmake {
+                    // This enables high-performance builds
+                    cFlags += "-O3"
+                    cppFlags += "-O3"
+                }
+            }
+        }
+    }
+	
+	externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
         }
     }
 
@@ -116,6 +161,7 @@ dependencies {
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.preference.ktx)
     ksp(libs.room.compiler)
 
     // Test dependencies
@@ -129,4 +175,18 @@ dependencies {
 
     //LLM
     implementation(libs.tasks.genai)
+    implementation("com.google.mediapipe:tasks-vision:latest.release")
+    implementation("com.google.mediapipe:tasks-text:latest.release")
+    implementation("com.google.mediapipe:tasks-audio:latest.release")
+
+
+    // Hilt Dependencies
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.android.compiler)
+
+    // Hilt support for WorkManager
+    implementation(libs.androidx.hilt.work)
+    ksp(libs.androidx.hilt.compiler)
+
+    implementation(libs.androidx.preference.ktx)
 }

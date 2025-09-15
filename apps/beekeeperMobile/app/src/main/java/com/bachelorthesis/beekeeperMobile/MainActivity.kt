@@ -8,7 +8,9 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Bundle
-import android.util.Log
+import android.util.Log as AndroidLog
+import android.view.Menu
+import android.view.MenuItem
 import android.view.View
 import android.widget.Button
 import android.widget.ProgressBar
@@ -20,6 +22,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.bachelorthesis.beekeeperMobile.assetManager.AssetManager
 import com.bachelorthesis.beekeeperMobile.assetManager.DownloadRequestInfo
+import com.bachelorthesis.beekeeperMobile.settings.SettingsActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -46,7 +49,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var downloadProgressBar: ProgressBar
     private lateinit var startButton: Button
     private lateinit var stopButton: Button
-    private lateinit var clearModelsButton: Button // NEW: Declare the new button
+    private lateinit var clearModelsButton: Button
 
     // Core Logic Components
     private lateinit var assetManager: AssetManager
@@ -65,14 +68,13 @@ class MainActivity : AppCompatActivity() {
         downloadProgressBar = findViewById(R.id.downloadProgressBar)
         startButton = findViewById(R.id.buttonStartService)
         stopButton = findViewById(R.id.buttonStopService)
-        clearModelsButton = findViewById(R.id.buttonClearModels) // NEW: Initialize the new button
+        clearModelsButton = findViewById(R.id.buttonClearModels)
 
         assetManager = AssetManager(this)
         registerReceiver(downloadReceiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), RECEIVER_EXPORTED)
 
         startButton.setOnClickListener { startBeekeeperService() }
         stopButton.setOnClickListener { stopBeekeeperService() }
-        // NEW: Set click listener for the clear models button
         clearModelsButton.setOnClickListener { showCleanupConfirmationDialog() }
     }
 
@@ -115,15 +117,14 @@ class MainActivity : AppCompatActivity() {
     }
     //endregion
 
-
     //region Asset Management
     private fun checkAssets() {
         updateUiForState(AppState.INITIALIZING, "Checking for AI models...")
         if (assetManager.checkPrerequisites()) {
-            Log.i(TAG, "All models are ready.")
+            AndroidLog.i(TAG, "All models are ready.")
             updateUiForState(AppState.READY_TO_START)
         } else {
-            Log.w(TAG, "Models not found. Starting download.")
+            AndroidLog.w(TAG, "Models not found. Starting download.")
             updateUiForState(AppState.DOWNLOADING)
             val downloads: DownloadRequestInfo = assetManager.queueModelDownloads()
             voskDownloadId = downloads.voskDownloadId
@@ -142,10 +143,10 @@ class MainActivity : AppCompatActivity() {
                     }
                     if (pendingDownloadIds.isEmpty()) {
                         if (assetManager.checkPrerequisites()) {
-                            Log.i(TAG, "All models successfully downloaded and prepared.")
+                            AndroidLog.i(TAG, "All models successfully downloaded and prepared.")
                             updateUiForState(AppState.READY_TO_START)
                         } else {
-                            Log.e(TAG, "Download finished, but prerequisites check failed.")
+                            AndroidLog.e(TAG, "Download finished, but prerequisites check failed.")
                             updateUiForState(AppState.INITIALIZING, "Error during setup. Please use the menu to clear models and try again.")
                         }
                     }
@@ -155,7 +156,21 @@ class MainActivity : AppCompatActivity() {
     }
     //endregion
 
-    //region Menu and Cleanup (Menu part is REMOVED, cleanup dialog is kept)
+    //region Menu and Cleanup
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.main_menu, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.action_settings -> {
+                startActivity(Intent(this, SettingsActivity::class.java))
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
+        }
+    }
 
     private fun showCleanupConfirmationDialog() {
         AlertDialog.Builder(this)
@@ -166,7 +181,8 @@ class MainActivity : AppCompatActivity() {
                     val success = assetManager.cleanup()
                     if (success) {
                         Toast.makeText(this@MainActivity, "Models cleared successfully.", Toast.LENGTH_SHORT).show()
-                        initiateSetup() // Re-initiate setup after cleanup
+                        stopBeekeeperService()
+                        initiateSetup()
                     } else {
                         Toast.makeText(this@MainActivity, "Failed to clear models.", Toast.LENGTH_SHORT).show()
                     }
@@ -184,7 +200,7 @@ class MainActivity : AppCompatActivity() {
                 statusTextView.text = message ?: "Initializing..."
                 startButton.isEnabled = false
                 stopButton.isEnabled = false
-                clearModelsButton.isEnabled = false // NEW: Disable during initialization
+                clearModelsButton.isEnabled = false
                 downloadProgressBar.visibility = View.VISIBLE
                 downloadProgressBar.isIndeterminate = true
             }
@@ -192,7 +208,7 @@ class MainActivity : AppCompatActivity() {
                 statusTextView.text = "Downloading required models..."
                 startButton.isEnabled = false
                 stopButton.isEnabled = false
-                clearModelsButton.isEnabled = false // NEW: Disable during download
+                clearModelsButton.isEnabled = false
                 downloadProgressBar.visibility = View.VISIBLE
                 downloadProgressBar.isIndeterminate = true
             }
@@ -200,14 +216,14 @@ class MainActivity : AppCompatActivity() {
                 statusTextView.text = "Ready to start listening session."
                 startButton.isEnabled = true
                 stopButton.isEnabled = false
-                clearModelsButton.isEnabled = true // NEW: Enable when ready
+                clearModelsButton.isEnabled = true
                 downloadProgressBar.visibility = View.GONE
             }
             AppState.SERVICE_RUNNING -> {
                 statusTextView.text = "Service is running..."
                 startButton.isEnabled = false
                 stopButton.isEnabled = true
-                clearModelsButton.isEnabled = true // NEW: Enable even when service is running
+                clearModelsButton.isEnabled = true
             }
         }
     }

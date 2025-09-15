@@ -4,4 +4,24 @@
     <string name="stop_listening_session">Stop Listening Session</string>
     <string name="initializing">Initializing…</string>
     <string name="clear_downloaded_models">Clear Downloaded Models</string>
+    <string name="settings_title">Settings</string>
+
+    <string name="settings_category_language">Language Settings</string>
+    <string name="settings_language_title">Preferred Voice Language</string>
+    <string name="settings_language_summary">Select the language for voice commands and feedback</string>
+
+    <!-- NEW: Voice Command Responses (English) -->
+    <string name="tts_response_yes">Yes?</string>
+    <string name="tts_response_processing">Processing...</string>
+    <string name="tts_response_ready_to_record">Okay, I\'m ready to record your note for beehive %1$d.</string>
+    <string name="tts_response_note_saved">Note saved for beehive %1$d.</string>
+    <string name="tts_response_last_note_is">The last note is: %1$s</string>
+    <string name="tts_response_no_notes_found">No notes found for beehive %1$d.</string>
+    <string name="tts_response_last_task_is">The last task is: %1$s</string>
+    <string name="tts_response_no_tasks_found">No tasks found for beehive %1$d.</string>
+    <string name="tts_error_no_hive_number_note">Sorry, I didn\'t catch the hive number for that note.</string>
+    <string name="tts_error_no_hive_number_log">Sorry, I couldn\'t understand which hive number you wanted the last log for.</string>
+    <string name="tts_error_no_hive_number_task">Sorry, I couldn\'t understand which hive number you wanted the last task for.</string>
+    <string name="tts_error_unknown_command">Sorry, I didn\'t understand that command. You can ask me to create a log or read the last log or task.</string>
+    <string name="tts_error_generic">There was an error: %1$s</string>
 </resources>

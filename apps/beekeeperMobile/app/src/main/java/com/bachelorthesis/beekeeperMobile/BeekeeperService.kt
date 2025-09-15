@@ -11,6 +11,7 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log as AndroidLog // Alias for Android's Log to avoid conflict
 import androidx.core.app.NotificationCompat
+import androidx.preference.PreferenceManager
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
@@ -18,16 +19,12 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.bachelorthesis.beekeeperMobile.assetManager.AssetManager
 import com.bachelorthesis.beekeeperMobile.intentRecognizer.IntentRecognizer
-import com.bachelorthesis.beekeeperMobile.intentRecognizer.LLMIntentRecognizer
-import com.bachelorthesis.beekeeperMobile.intentRecognizer.RegexIntentRecognizer
 import com.bachelorthesis.beekeeperMobile.intentRecognizer.StructuredIntent
-import com.bachelorthesis.beekeeperMobile.persistance.AppDatabase // NEW
-import com.bachelorthesis.beekeeperMobile.persistance.ApiService // NEW
 import com.bachelorthesis.beekeeperMobile.persistance.LogRepository // NEW
-import com.bachelorthesis.beekeeperMobile.persistance.RetrofitClient // NEW
 import com.bachelorthesis.beekeeperMobile.speechEngine.SpeechEngine
 import com.bachelorthesis.beekeeperMobile.speechEngine.SpeechEngineListener
 import com.bachelorthesis.beekeeperMobile.sync.SyncWorker
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -35,23 +32,26 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineListener {
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private var speechEngine: SpeechEngine? = null
-    private var intentRecognizer: IntentRecognizer? = null
     private var textToSpeech: TextToSpeech? = null
-    private lateinit var assetManager: AssetManager
 
-    // NEW: Database and Repository instances
-    private lateinit var appDatabase: AppDatabase
-    private lateinit var apiService: ApiService
-    private lateinit var logRepository: LogRepository
+    // --- INJECTED DEPENDENCIES ---
+    @Inject
+    lateinit var assetManager: AssetManager // Injected!
+    @Inject
+    lateinit var intentRecognizer: IntentRecognizer // Injected!
+    @Inject
+    lateinit var logRepository: LogRepository
 
     private enum class ServiceState {
-        STOPPED, INITIALIZING, IDLE, AWOKEN, AWAITING_NOTE, PROCESSING, SPEAKING
+        STOPPED, INITIALIZING, IDLE, AWOKEN, AWAITING_NOTE, AWAITING_ANSWER, PROCESSING, SPEAKING
     }
     private var currentState: ServiceState = ServiceState.STOPPED
 
@@ -64,6 +64,8 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
 
     private var pendingIntent: StructuredIntent? = null
 
+    private lateinit var preferredLocale: Locale
+
     //region Service Lifecycle
     override fun onCreate() {
         super.onCreate()
@@ -71,32 +73,64 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
         setupNotificationChannel()
         transitionToState(ServiceState.INITIALIZING)
 
-        assetManager = AssetManager(this)
-
         if (!assetManager.checkPrerequisites()) {
             AndroidLog.e(TAG, "Prerequisites not met. Models are not available.")
             handleError("AI models not found. Please run the app's main screen to download them.", true)
             return
         }
 
-        serviceScope.launch {
-            // NEW: Initialize Database, API Service, and Repository
-            appDatabase = AppDatabase.getDatabase(applicationContext)
-            apiService = RetrofitClient.instance // Reusing the singleton Retrofit instance
-            logRepository = LogRepository(appDatabase.logDao(), apiService)
-            isDatabaseReady = true
-            isRepositoryReady = true
-            AndroidLog.d(TAG, "Database and Repository initialized.")
+        val sharedPrefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val languageTag = sharedPrefs.getString("preferred_language", "en-US") ?: "en-US"
+        preferredLocale = Locale.forLanguageTag(languageTag)
+        AndroidLog.d(TAG, "Service started with preferred language: ${preferredLocale.toLanguageTag()}")
 
+
+        serviceScope.launch {
+            // TextToSpeech is tied to the service lifecycle, so we still create it here.
             textToSpeech = TextToSpeech(this@BeekeeperService, this@BeekeeperService)
-            initializeIntentRecognizerWithFallback()
+
+            // Initialize the injected recognizer
+            initializeIntentRecognizer()
+
+            // SpeechEngine is also tied to the service lifecycle (needs a listener).
+            // We create it here but pass it its dependencies (which we got from DI).
             initializeSpeechEngine()
 
-            checkInitializationComplete() // Re-check after DB/Repo are ready
             scheduleLogSyncWorker()
+        }
+
+    }
+
+    private fun initializeSpeechEngine() {
+        // We create it here, but its dependencies are clean.
+        speechEngine = SpeechEngine(this, this, assetManager) // Pass the injected AssetManager
+        speechEngine?.initialize { success ->
+            if (success) {
+                AndroidLog.d(TAG, "Speech Engine Initialized successfully.")
+                isSpeechEngineReady = true
+                checkInitializationComplete()
+            } else {
+                handleError("Speech Engine could not start", true)
+            }
         }
     }
 
+    private fun initializeIntentRecognizer() {
+        AndroidLog.i(TAG, "Initializing intent recognizer: ${intentRecognizer.javaClass.simpleName}")
+
+        // The logic for fallback is now handled in the AppModule. Here we just initialize.
+        val modelPath = assetManager.getLlmModelPath().absolutePath
+        intentRecognizer.initialize(this, modelPath) { success ->
+            if (success) {
+                isIntentRecognizerReady = true
+                checkInitializationComplete()
+            } else {
+                // This would happen if the LLM model file exists but is corrupt.
+                // In this rare case, we can't recover, so we should error out.
+                handleError("The primary intent recognizer failed to initialize.", true)
+            }
+        }
+    }
 
     private fun scheduleLogSyncWorker() {
         val constraints = Constraints.Builder()
@@ -118,44 +152,6 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
         AndroidLog.d(TAG, "Log synchronization worker scheduled.")
     }
 
-    private fun initializeSpeechEngine() {
-        speechEngine = SpeechEngine(this, this).apply {
-            val voskPath = assetManager.getVoskModelPath().absolutePath
-            initialize(voskPath) { success ->
-                if (success) {
-                    AndroidLog.d(TAG, "Speech Engine Initialized successfully.")
-                    isSpeechEngineReady = true
-                    checkInitializationComplete()
-                } else {
-                    handleError("Speech Engine could not start", true)
-                }
-            }
-        }
-    }
-
-    private fun initializeIntentRecognizerWithFallback() {
-        AndroidLog.i(TAG, "Attempting to initialize LLM Intent Recognizer...")
-        val llmRecognizer = LLMIntentRecognizer()
-        val llmPath = assetManager.getLlmModelPath().absolutePath
-
-        llmRecognizer.initialize(this, llmPath) { success ->
-            if (success) {
-                this.intentRecognizer = llmRecognizer
-                isIntentRecognizerReady = true
-                checkInitializationComplete()
-            } else {
-                AndroidLog.w(TAG, "LLM Recognizer failed to initialize. Falling back to Regex Recognizer.")
-                llmRecognizer.close()
-                val regexRecognizer = RegexIntentRecognizer()
-                regexRecognizer.initialize(this) {
-                    this.intentRecognizer = regexRecognizer
-                    isIntentRecognizerReady = true
-                    checkInitializationComplete()
-                }
-            }
-        }
-    }
-
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = createNotification()
         startForeground(NOTIFICATION_ID, notification)
@@ -164,7 +160,7 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            textToSpeech?.language = Locale.US
+            textToSpeech?.language = preferredLocale
             textToSpeech?.setOnUtteranceProgressListener(ttsListener)
             isTtsReady = true
             checkInitializationComplete()
@@ -187,7 +183,7 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
         AndroidLog.d(TAG, "Service Destroying...")
         serviceScope.cancel()
         speechEngine?.destroy()
-        intentRecognizer?.close()
+        intentRecognizer.close()
         textToSpeech?.stop()
         textToSpeech?.shutdown()
         // No explicit shutdown for Room database needed, as it's typically managed by the app process.
@@ -198,7 +194,7 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
     override fun onHotwordDetected() {
         if (currentState == ServiceState.IDLE) {
             transitionToState(ServiceState.AWOKEN)
-            speak("Yes?", UTTERANCE_ID_PROMPT_FOR_COMMAND)
+            speak(getString(R.string.tts_response_yes), UTTERANCE_ID_PROMPT_FOR_COMMAND) // MODIFIED
         }
     }
 
@@ -208,8 +204,8 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
         } else {
             AndroidLog.i(TAG, "Command received: '$text'. Sending to LLM.")
             transitionToState(ServiceState.PROCESSING)
-            speak("Processing", UTTERANCE_ID_PROMPT_FOR_COMMAND) // Speak "Processing" as feedback
-            intentRecognizer?.recognizeIntent(text, ::processStructuredIntent)
+            speak(getString(R.string.tts_response_processing), UTTERANCE_ID_PROMPT_FOR_COMMAND) // MODIFIED
+            intentRecognizer.recognizeIntent(text, preferredLocale, ::processStructuredIntent)
         }
     }
 
@@ -229,13 +225,23 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
 
         override fun onDone(utteranceId: String?) {
             serviceScope.launch(Dispatchers.Main) {
-                when (utteranceId) {
-                    UTTERANCE_ID_PROMPT_FOR_COMMAND -> speechEngine?.startListeningForCommand()
-                    UTTERANCE_ID_PROMPT_FOR_NOTE -> {
+                when {
+                    currentState == ServiceState.AWAITING_ANSWER -> {
+                        AndroidLog.d(TAG, "TTS finished prompting for answer, now listening for user's response.")
+                        speechEngine?.startListeningForCommand()
+                    }
+                    // MODIFIED: Now we explicitly tell the engine to listen for the hotword
+                    // after the final response has been spoken.
+                    utteranceId == UTTERANCE_ID_COMMAND_RESPONSE -> {
+                        transitionToState(ServiceState.IDLE)
+                        speechEngine?.startListeningForHotword() // RE-ENGAGE HOTWORD LISTENING
+                    }
+                    // Legacy single-turn logic
+                    utteranceId == UTTERANCE_ID_PROMPT_FOR_COMMAND -> speechEngine?.startListeningForCommand()
+                    utteranceId == UTTERANCE_ID_PROMPT_FOR_NOTE -> {
                         transitionToState(ServiceState.AWAITING_NOTE)
                         speechEngine?.startListeningForCommand()
                     }
-                    UTTERANCE_ID_COMMAND_RESPONSE -> transitionToState(ServiceState.IDLE)
                 }
             }
         }
@@ -255,40 +261,47 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
     }
 
     private fun processStructuredIntent(intent: StructuredIntent) {
-        AndroidLog.d(TAG, "Processing Intent: ${intent.intentName} with entities: ${intent.entities}")
-        transitionToState(ServiceState.PROCESSING) // Keep processing state while intent is handled
+        AndroidLog.d(TAG, "Processing Intent: ${intent.intentName}, response: '${intent.responseText}'")
+        transitionToState(ServiceState.PROCESSING)
 
-        when (intent.intentName) {
-            "create_log" -> {
-                val hiveId = intent.entities["hive_id"]?.toIntOrNull()
-                val content = intent.entities["content"]
-                if (hiveId != null && !content.isNullOrBlank()) {
-                    saveNoteForHive(hiveId, content)
-                } else if (hiveId != null) {
-                    this.pendingIntent = intent
-                    speak("Okay, I'm ready to record your note for beehive $hiveId", UTTERANCE_ID_PROMPT_FOR_NOTE)
-                } else {
-                    speak("Sorry, I didn't catch the hive number for that note.", UTTERANCE_ID_COMMAND_RESPONSE)
+        val responseToSpeak = intent.responseText ?: getString(R.string.tts_error_unknown_command)
+
+        // NEW: Multi-turn conversation logic
+        // We check if the intent is 'create_log' but is missing the 'content' entity.
+        // This is our signal for a multi-turn conversation.
+        if (intent.intentName == "create_log" && !intent.entities.containsKey("content")) {
+            // Store the partial intent for later.
+            this.pendingIntent = intent
+            // Transition to the new state so the ttsListener knows to re-engage the microphone.
+            transitionToState(ServiceState.AWAITING_ANSWER)
+            speak(responseToSpeak, UTTERANCE_ID_MULTI_TURN_PROMPT) // Use a new utterance ID for clarity
+        } else {
+            // For all other cases, it's a single-turn command.
+            speak(responseToSpeak, UTTERANCE_ID_COMMAND_RESPONSE)
+
+            when (intent.intentName) {
+                "create_log" -> {
+                    val hiveId = intent.entities["hive_id"]?.toIntOrNull()
+                    val content = intent.entities["content"]
+                    if (hiveId != null && content != null) {
+                        saveNoteForHive(hiveId, content)
+                    }
                 }
-            }
-            "read_last_log" -> {
-                val hiveId = intent.entities["hive_id"]?.toIntOrNull()
-                if (hiveId != null) {
-                    fetchLastLog(hiveId)
-                } else {
-                    speak("Sorry, I couldn't understand which hive number you wanted the last log for.", UTTERANCE_ID_COMMAND_RESPONSE)
+                "read_last_log" -> {
+                    val hiveId = intent.entities["hive_id"]?.toIntOrNull()
+                    if (hiveId != null) {
+                        fetchLastLog(hiveId)
+                    }
                 }
-            }
-            "read_last_task" -> {
-                val hiveId = intent.entities["hive_id"]?.toIntOrNull()
-                if (hiveId != null) {
-                    fetchLastTask(hiveId)
-                } else {
-                    speak("Sorry, I couldn't understand which hive number you wanted the last task for.", UTTERANCE_ID_COMMAND_RESPONSE)
+                "read_last_task" -> {
+                    val hiveId = intent.entities["hive_id"]?.toIntOrNull()
+                    if (hiveId != null) {
+                        fetchLastTask(hiveId)
+                    }
                 }
-            }
-            else -> {
-                speak("Sorry, I didn't understand that command. You can ask me to create a log or read the last log or task.", UTTERANCE_ID_COMMAND_RESPONSE)
+                "unknown" -> {
+                    // No action needed.
+                }
             }
         }
     }
@@ -303,27 +316,22 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
         pendingIntent = null
     }
 
-    // MODIFIED: Uses LogRepository for local persistence
     private fun saveNoteForHive(hiveId: Int, content: String) {
-        transitionToState(ServiceState.PROCESSING)
         serviceScope.launch {
-            if (!::logRepository.isInitialized) { // Basic check for repository readiness
+            if (!::logRepository.isInitialized) {
                 handleError("Log repository not initialized, cannot save note.", false)
                 return@launch
             }
             try {
-                // Save locally first
                 val localLogEntry = logRepository.createLog(hiveId, content)
                 AndroidLog.d(TAG, "Note saved locally for beehive $hiveId, local ID: ${localLogEntry.id}")
-                speak("Note saved for beehive $hiveId", UTTERANCE_ID_COMMAND_RESPONSE)
-                // The WorkManager will handle syncing this to the backend later.
+                // TTS confirmation is now handled by the LLM's responseText.
             } catch (e: Exception) {
                 handleError("There was an error saving the note locally: ${e.message}", false)
             }
         }
     }
 
-    // MODIFIED: Uses LogRepository to fetch from remote
     private fun fetchLastLog(hiveId: Int) {
         serviceScope.launch {
             if (!::logRepository.isInitialized) {
@@ -333,9 +341,9 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
             try {
                 val remoteLog = logRepository.fetchLastLogFromRemote(hiveId)
                 val responseText = if (remoteLog != null && remoteLog.content.isNotEmpty()) {
-                    "The last note is: ${remoteLog.content}"
+                    getString(R.string.tts_response_last_note_is, remoteLog.content)
                 } else {
-                    "No notes found for beehive $hiveId."
+                    getString(R.string.tts_response_no_notes_found, hiveId)
                 }
                 speak(responseText, UTTERANCE_ID_COMMAND_RESPONSE)
             } catch (e: Exception) {
@@ -344,7 +352,6 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
         }
     }
 
-    // MODIFIED: Uses LogRepository to fetch from remote
     private fun fetchLastTask(hiveId: Int) {
         serviceScope.launch {
             if (!::logRepository.isInitialized) {
@@ -354,9 +361,9 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
             try {
                 val remoteTask = logRepository.fetchLastTaskFromRemote(hiveId)
                 val responseText = if (remoteTask != null && remoteTask.content.isNotEmpty()) {
-                    "The last task is: ${remoteTask.content}"
+                    getString(R.string.tts_response_last_task_is, remoteTask.content)
                 } else {
-                    "No tasks found for beehive $hiveId."
+                    getString(R.string.tts_response_no_tasks_found, hiveId)
                 }
                 speak(responseText, UTTERANCE_ID_COMMAND_RESPONSE)
             } catch (e: Exception) {
@@ -368,7 +375,8 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
     private fun handleError(errorMessage: String, isFatal: Boolean) {
         AndroidLog.e(TAG, "ERROR: $errorMessage (isFatal: $isFatal)")
         if (!isFatal) {
-            speak("There was an error: $errorMessage", UTTERANCE_ID_COMMAND_RESPONSE)
+            val response = getString(R.string.tts_error_generic, errorMessage) // MODIFIED
+            speak(response, UTTERANCE_ID_COMMAND_RESPONSE)
         } else {
             stopSelf()
         }
@@ -403,6 +411,7 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
         ServiceState.IDLE -> "Listening for 'hey beekeeper'..."
         ServiceState.AWOKEN -> "Awake! How can I help?"
         ServiceState.AWAITING_NOTE -> "Ready to record your note..."
+        ServiceState.AWAITING_ANSWER -> "Waiting for your response..."
         ServiceState.PROCESSING -> "Thinking..."
         ServiceState.SPEAKING -> "Speaking..."
     }
@@ -416,5 +425,6 @@ class BeekeeperService : Service(), TextToSpeech.OnInitListener, SpeechEngineLis
         private const val UTTERANCE_ID_PROMPT_FOR_COMMAND = "PROMPT_FOR_COMMAND"
         private const val UTTERANCE_ID_PROMPT_FOR_NOTE = "PROMPT_FOR_NOTE"
         private const val UTTERANCE_ID_COMMAND_RESPONSE = "COMMAND_RESPONSE"
+        private const val UTTERANCE_ID_MULTI_TURN_PROMPT = "MULTI_TURN_PROMPT"
     }
 }

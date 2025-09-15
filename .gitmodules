@@ -1,0 +1,3 @@
+[submodule "apps/beekeeperMobile/app/src/main/cpp/whisper.cpp"]
+	path = apps/beekeeperMobile/app/src/main/cpp/whisper.cpp
+	url = https://github.com/ggerganov/whisper.cpp
