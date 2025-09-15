@@ -89,8 +89,16 @@ android {
             buildConfigField("String", "LLM_MODEL_URL", "\"https://huggingface.co/litert-community/gemma-3-270m-it/resolve/main/gemma3-270m-it-q8.task\"")
             buildConfigField("String", "LLM_MODEL_FILENAME", "\"gemma3-270m-it-q8.task\"")
 
-            buildConfigField("String", "WHISPER_MODEL_URL", "\"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin\"")
-            buildConfigField("String", "WHISPER_MODEL_FILENAME", "\"ggml-base.en.bin\"")
+            buildConfigField("String", "WHISPER_MODEL_URL", "\"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q8_0.bin\"")
+            buildConfigField("String", "WHISPER_MODEL_FILENAME", "\"ggml-base-q8_0.bin\"")
+
+            externalNativeBuild {
+                cmake {
+                    // This enables high-performance builds
+                    cFlags += "-O3"
+                    cppFlags += "-O3"
+                }
+            }
         }
     }
 	
@@ -160,6 +168,8 @@ dependencies {
     implementation("com.google.mediapipe:tasks-vision:latest.release")
     implementation("com.google.mediapipe:tasks-text:latest.release")
     implementation("com.google.mediapipe:tasks-audio:latest.release")
+
+    implementation("com.cloudflare.realtimekit.android-vad:silero:2.0.9")
 
     implementation(libs.androidx.preference.ktx)
 }

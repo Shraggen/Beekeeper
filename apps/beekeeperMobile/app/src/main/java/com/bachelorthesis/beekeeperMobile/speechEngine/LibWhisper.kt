@@ -24,7 +24,13 @@ object LibWhisper {
      * @param contextPtr Pointer to the whisper_context.
      * @param nThreads The number of threads to use for computation.
      * @param audioData The audio data in 32-bit PCM format.
+     * @param language The language to use for transcription.
      * @return The transcribed text.
      */
-    external fun transcribe(contextPtr: Long, nThreads: Int, audioData: FloatArray): String
+    external fun transcribe(contextPtr: Long, nThreads: Int, audioData: FloatArray, language: String = "auto"): String
+
+    /**
+     * Returns a map of supported languages and their full names.
+     */
+    external fun getLanguages() : Map<String, String>
 }
