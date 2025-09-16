@@ -90,7 +90,7 @@ jobs:
         with:
           name: beekeeper-mobile-apk
           # The APK is generated in this specific folder
-          path: apps/beekeeperMobile/app/build/outputs/apk/release/app-release-unsigned.apk
+          path: apps/beekeeperMobile/app/build/outputs/apk/release/app-release.apk
 
   # Job 3: Create the final GitHub Release (only runs if both builds succeed)
   create-release:
