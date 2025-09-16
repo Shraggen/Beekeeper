@@ -1,0 +1,34 @@
+# .github/workflows/release.yml
+
+name: Manual Release
+
+# This makes the workflow manually triggerable from the GitHub Actions UI
+on:
+  workflow_dispatch:
+    # This defines the input fields that will appear in the UI form
+    inputs:
+      version:
+        description: 'The version tag to create (e.g., v1.2.0)'
+        required: true
+        type: string
+
+jobs:
+  # This first job is just to verify our trigger and inputs are working
+  create-release-package:
+    name: Create Release Package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      # We will print the version number provided by the user to confirm it works
+      - name: Echo Release Version
+        run: echo "Starting release process for version ${{ github.event.inputs.version }}..."
+
+      # Placeholder for future steps
+      - name: Build and Package Backend (Placeholder)
+        run: echo "Backend build would happen here..."
+
+      - name: Build and Package Android (Placeholder)
+        run: echo "Android build would happen here..."
