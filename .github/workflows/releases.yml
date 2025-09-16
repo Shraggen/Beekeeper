@@ -10,6 +10,10 @@ on:
         required: true
         type: string
 
+
+permissions:
+  contents: write
+
 jobs:
   # Job 1: Build the Go backend for multiple platforms
   backend-build:
@@ -105,12 +109,10 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          # Use the version number from the manual trigger as the tag name
           tag_name: ${{ github.event.inputs.version }}
-          # Create a release title
           name: Release ${{ github.event.inputs.version }}
-          # You can add release notes here. 'true' will auto-generate from commits.
           generate_release_notes: true
-          # Point to all the files we downloaded to upload them to the release
           files: |
             release-artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
