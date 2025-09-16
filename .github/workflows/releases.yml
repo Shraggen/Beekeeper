@@ -2,10 +2,8 @@
 
 name: Manual Release
 
-# This makes the workflow manually triggerable from the GitHub Actions UI
 on:
   workflow_dispatch:
-    # This defines the input fields that will appear in the UI form
     inputs:
       version:
         description: 'The version tag to create (e.g., v1.2.0)'
@@ -13,22 +11,104 @@ on:
         type: string
 
 jobs:
-  # This first job is just to verify our trigger and inputs are working
-  create-release-package:
-    name: Create Release Package
+  # Job 1: Build the Go backend for multiple platforms
+  backend-build:
+    name: Build Backend Binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Define the platforms we want to build for
+        goos: [linux, windows]
+        goarch: [amd64]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+
+      - name: Build Go Binary
+        run: go build -o beekeeper-backend-${{ matrix.goos }}-${{ matrix.goarch }}
+        working-directory: ./apps/beekeeperBackend
+        # Set environment variables for cross-compilation
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+
+      - name: Upload Backend Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: beekeeper-backend-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: apps/beekeeperBackend/beekeeper-backend-${{ matrix.goos }}-${{ matrix.goarch }}
+
+  # Job 2: Build the Android release APK
+  android-build:
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5
 
-      # We will print the version number provided by the user to confirm it works
-      - name: Echo Release Version
-        run: echo "Starting release process for version ${{ github.event.inputs.version }}..."
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'jetbrains'
 
-      # Placeholder for future steps
-      - name: Build and Package Backend (Placeholder)
-        run: echo "Backend build would happen here..."
+      - name: Setup Gradle Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
 
-      - name: Build and Package Android (Placeholder)
-        run: echo "Android build would happen here..."
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+        working-directory: ./apps/beekeeperMobile
+
+      # NOTE: For a real app, you would add steps here to decode and use signing keys from GitHub Secrets.
+      # For this project, 'assembleRelease' will use the default debug signing key which is sufficient.
+      - name: Build Release APK
+        run: ./gradlew assembleRelease
+        working-directory: ./apps/beekeeperMobile
+
+      - name: Upload Android APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: beekeeper-mobile-apk
+          # The APK is generated in this specific folder
+          path: apps/beekeeperMobile/app/build/outputs/apk/release/app-release-unsigned.apk
+
+  # Job 3: Create the final GitHub Release (only runs if both builds succeed)
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    # This job depends on the successful completion of the build jobs
+    needs: [backend-build, android-build]
+
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v5
+        with:
+          # Download all artifacts into a directory named 'release-artifacts'
+          path: release-artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # Use the version number from the manual trigger as the tag name
+          tag_name: ${{ github.event.inputs.version }}
+          # Create a release title
+          name: Release ${{ github.event.inputs.version }}
+          # You can add release notes here. 'true' will auto-generate from commits.
+          generate_release_notes: true
+          # Point to all the files we downloaded to upload them to the release
+          files: |
+            release-artifacts/**/*
