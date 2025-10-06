@@ -24,7 +24,7 @@ cronetEmbedded = "119.6045.31"
 room = "2.8.0"
 workRuntimeKtx = "2.10.4"
 preferenceKtx = "1.2.1"
-runtime = "1.0.0-alpha05"
+runtime = "1.0.0-alpha06"
 workTesting = "2.10.4"
 runner = "1.7.0"
 
