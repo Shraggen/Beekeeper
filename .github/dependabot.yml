@@ -8,12 +8,12 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
   - package-ecosystem: "gomod"
     directory: "/apps/beekeeperBackend"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
   - package-ecosystem: "gradle"
     directory: "/apps/beekeeperMobile"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
