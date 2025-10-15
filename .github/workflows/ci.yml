@@ -75,7 +75,7 @@ jobs:
           args: '-no-fail -fmt sarif -out apps/beekeeperBackend/results.sarif ./apps/beekeeperBackend/...'
 
       - name: Upload SARIF file for GitHub Advanced Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: apps/beekeeperBackend/results.sarif
           category: 'Go Security Scan'
@@ -118,7 +118,7 @@ jobs:
 
       # --- NEW: Android Security Steps ---
       - name: Initialize CodeQL (SAST)
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: java # Specify Java as we are scanning the Kotlin/Java code
           queries: +security-and-quality
@@ -129,7 +129,7 @@ jobs:
         working-directory: ./apps/beekeeperMobile
 
       - name: Perform CodeQL Analysis (SAST)
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
 
       # Note: For Android, SCA is best handled by Dependabot, which we'll enable next.
       # A manual Gradle dependency check can be added here but is often slow and noisy.
