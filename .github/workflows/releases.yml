@@ -43,7 +43,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
 
       - name: Upload Backend Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: beekeeper-backend-${{ matrix.goos }}-${{ matrix.goarch }}
           path: apps/beekeeperBackend/beekeeper-backend-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -86,7 +86,7 @@ jobs:
         working-directory: ./apps/beekeeperMobile
 
       - name: Upload Android APK Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: beekeeper-mobile-apk
           # The APK is generated in this specific folder
