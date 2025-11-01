@@ -101,7 +101,7 @@ jobs:
 
     steps:
       - name: Download all build artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           # Download all artifacts into a directory named 'release-artifacts'
           path: release-artifacts
